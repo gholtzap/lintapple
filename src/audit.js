@@ -1,5 +1,5 @@
 // Runs in the browser. Use one report shape for all design rules.
-export async function audit({ policy, contrast }) {
+export async function audit({ policy, contrast, accessibility, format }) {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   const findings = [];
@@ -16,7 +16,7 @@ export async function audit({ policy, contrast }) {
   const add = (rule, element, actual, expected, fix, related, details = {}) => {
     const exception = policy.exceptions.find(e => e.rules.includes(rule) && element.matches(e.selector));
     if (exception) { suppressed.push({ rule, selector: selector(element), reason: exception.reason }); return; }
-    findings.push({ rule, selector: selector(element), message: `Expected ${expected}. Found ${actual}.`, actual, expected, fix, ...(related ? { relatedSelector: selector(related) } : {}), ...details });
+    findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
   const suppressed = [];
   const visible = el => !el.closest('[inert]') && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
@@ -82,6 +82,29 @@ export async function audit({ policy, contrast }) {
   for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
   for (const el of elements.filter(el => el.matches('[data-ui-stack]')))
     checkGap([...el.children].filter(visible), 'layout-gap', policy.minLayoutGap);
+  let alignmentGroups = 0;
+  for (const group of elements.filter(el => el.matches('[data-ui-align]'))) {
+    const alignment = group.getAttribute('data-ui-align');
+    const items = [...group.querySelectorAll('[data-ui-align-item]')].filter(el => el.closest('[data-ui-align]') === group);
+    if (!['start', 'center', 'end'].includes(alignment) || items.length < 2) {
+      add('layout-alignment', group, `${alignment || 'empty alignment'} with ${items.length} marked items`, 'start, center, or end alignment with at least two marked items', 'Set data-ui-align and mark the elements that must align with data-ui-align-item.');
+      continue;
+    }
+    const targets = items.filter(visible);
+    if (targets.length < 2) continue;
+    alignmentGroups++;
+    const rtl = styles.get(group).direction === 'rtl';
+    const position = element => {
+      const rect = element.getBoundingClientRect();
+      return alignment === 'center' ? (rect.left + rect.right) / 2 : rect[(alignment === 'start') !== rtl ? 'left' : 'right'];
+    };
+    const reference = targets[0];
+    for (const target of targets.slice(1)) {
+      const distance = Math.abs(position(target) - position(reference));
+      if (distance > 1)
+        add('layout-alignment', target, `${Number(distance.toFixed(2))}px horizontal misalignment`, `horizontal ${alignment} alignment within 1px`, 'Align the marked elements. Use matching margins and container padding.', reference);
+    }
+  }
   const edgeInsets = (outer, inner) => ({
     left: inner.left - outer.left,
     top: inner.top - outer.top,
@@ -266,5 +289,6 @@ export async function audit({ policy, contrast }) {
       } catch (error) { reportContrast(el, 'unresolved', data, `placeholder calculation failed: ${error.message}`); }
     }
   } finally { contrast.teardown(); }
-  return { findings, suppressed, elements: elements.length, controls: controls.length, insetControls, numericElements, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+  const accessibilityCoverage = await accessibility({ elements, controls, visible, add, engine: contrast });
+  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }

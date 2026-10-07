@@ -1,6 +1,6 @@
 {
   "name": "lintapple",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Check rendered interfaces against explicit design rules.",
   "type": "module",
   "bin": {
@@ -17,13 +17,16 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node bin/lintapple.js"
+    "check": "node bin/lintapple.js",
+    "demo": "node demo/server.js",
+    "demo:check": "node --test test/demo.test.js",
+    "release:build": "node scripts/build-release.mjs"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
     "axe-core": "4.14.0",
-    "playwright": "^1.58.0"
+    "playwright": "1.63.0"
   }
 }

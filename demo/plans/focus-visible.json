@@ -1,0 +1,9 @@
+{
+  "timeout": 300,
+  "maxTabStops": 12,
+  "focus": [
+    {
+      "selector": "#focus-target"
+    }
+  ]
+}

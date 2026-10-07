@@ -40,6 +40,27 @@ npm test
 
 `npm test` starts a local server and runs the real CLI on valid, invalid, and edge-case pages. It checks mobile and desktop layouts, stable reports, scoped exceptions, and execution errors. It writes a report and receipt to `test-results/`.
 
+## Rule demo
+
+The demo uses the layout of [Craft](https://craft.gustavofior.com/) to show ten rules from this repo. Each rule has a before page, an after page, the fix, and saved results from the real checker.
+
+```sh
+npm run demo
+# Open http://localhost:4173/demo/
+```
+
+Select Before or After on a card, or select the rule title to compare both states. The demo starts in dark mode. The theme button changes the page and examples between light and dark themes.
+
+In Complete labels, drag the example's lower-right corner or use the width slider. The before text is clipped at small widths. The after text wraps. The displayed lint count applies to the initial width.
+
+```sh
+npm run demo:check
+```
+
+This command checks each example as a main document at 248, 330, 390, and 1440 px in both themes. Before pages must fail their named rule. After pages must have no findings. It saves the actual results in `demo/reports.json`. It also checks the index, each rule detail, theme controls, and open mobile navigation at 390, 768, and 1440 px. The policy and exceptions stay unchanged.
+
+The gallery uses iframes to keep each example's CSS separate. The checker does not inspect iframe content from the parent page. The direct example checks are required. The displayed findings are saved results, not live checks on the visitor's device.
+
 ## Policy
 
 Edit `ui-policy.json` to state your design decisions. Fonts, general font sizes, sizes by text role, minimum control size, control gaps, control insets, container selectors, component gaps, prohibited phrases, viewports, and color schemes are configurable.
@@ -74,6 +95,7 @@ For light and dark checks, set `colorSchemes` to `["light", "dark"]`. This tests
 | `control-gap` | Sibling buttons, or buttons in a marked action group, have the minimum measured gap. Overlap fails too. |
 | `control-inset` | Buttons stay at least 8 px from each inner edge of their nearest configured container. The minimum is configurable. Borders do not count as padding. |
 | `layout-gap` | Visible direct children of a marked stack have the minimum measured gap. |
+| `layout-alignment` | Marked elements share a horizontal start edge, center, or end edge within 1 px. |
 | `copy` | Visible text has no configured prohibited phrase, including phrases split across inline elements. |
 | `tabular-numbers` | Marked changing values and inferred numeric table cells request tabular figures. |
 | `numeric-alignment` | Inferred numeric table cells are right aligned. |
@@ -105,6 +127,26 @@ For light and dark checks, set `colorSchemes` to `["light", "dark"]`. This tests
 The radius contract is for a visible direct child, equal insets, and equal circular pixel radii. It includes the parent border in the measured inset. Unsupported shapes fail the contract. Do not mark surfaces whose corners do not follow each other.
 
 Gap checks compare child boxes that overlap along one axis. They support rows, columns, wrapping, and grids. They do not judge diagonal spacing or arbitrary relationships between unmarked components.
+
+### Layout alignment
+
+Use `data-ui-align="start"`, `"center"`, or `"end"` on a group. Mark at least two elements with `data-ui-align-item`. The first visible marked element is the reference. The checker compares the rendered boxes, even when an element is inside a padded wrapper.
+
+```html
+<section data-ui-align="start">
+  <p data-ui-align-item style="margin-inline:8px">Edit project</p>
+  <div class="ui-actions" data-ui-actions data-ui-container>
+    <button data-ui-align-item>Cancel</button>
+    <button>Save</button>
+  </div>
+</section>
+```
+
+The heading margin matches the existing action container's 8 px padding. This keeps the heading aligned with the button edge and preserves the control inset.
+
+`start` and `end` use the group's text direction. Hidden and inert items are excluded. Each item belongs to its nearest marked group, so nested groups are checked separately. A group with fewer than two visible items has no measured alignment check. Invalid alignment values or fewer than two declared items produce a finding. `alignmentGroups` in the report counts groups with at least two visible items.
+
+This rule checks only marked element boxes. It does not compare glyph edges, text baselines, or optical alignment. Use it for axis-aligned elements. Mark only the items that must align; other layouts remain valid.
 
 ### Control insets
 
@@ -189,7 +231,55 @@ The first Craft rules come from published articles:
 
 The font, type scale, spacing, copy, and overflow rules are additional project policy. [Craft's index](https://craft.gustavofior.com/) contains several entries that are not yet published. They are not treated as complete specifications.
 
-Hover timing, optical alignment, icon style, text wrapping quality, and other visual judgments are not checked in this version. We do not convert each design suggestion into a universal error.
+Hover timing, optical alignment, icon style, text wrapping quality, and other visual judgments are not checked in this version. The icon-button tooltip requirement is an explicit design rule, separate from accessibility requirements.
+
+## Accessibility and agent controls
+
+Every page check now runs the pinned axe-core engine for accessible names, form labels, visible-label/name consistency, ARIA state validity, hidden focusable controls, and WCAG 2.2 target size. The `target-size` rule uses the engine's size and spacing checks. It does not replace the separate configurable `control-size` design rule or require every target to be 24px. Some exceptions need review. See [WCAG target size](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html).
+
+The new rule IDs are `accessible-name`, `form-label`, `aria-reference`, `label-consistency`, `control-state`, `keyboard-operation`, `focus-visible`, `focus-obscured`, `dialog-focus`, `icon-button-tooltip`, and `target-size`.
+
+Accessibility findings include `category: "accessibility"` and `status: "failed"` or `"unresolved"`. Tooltips use `category: "design"`. An unresolved finding needs review; it is not a measured failure or a pass. Both statuses make the CLI exit 1. Existing selector-based exceptions apply to each new rule.
+
+Buttons and links need accessible names. Use native HTML and visible labels where possible. An icon button can use `aria-label`, `aria-labelledby`, or visually hidden text. A form field needs a programmatic label; a placeholder or title alone does not meet this linter's form-label rule. Good roles, names, and states also let agents find controls by their meaning. The checker cannot decide whether a nonempty name accurately describes an action.
+
+For an icon button, provide a text tooltip as well as an accessible name:
+
+```html
+<button type="button" aria-label="Delete message" aria-describedby="delete-tip">
+  <svg aria-hidden="true"><!-- Icon from your icon library --></svg>
+</button>
+<span id="delete-tip" role="tooltip" hidden>Delete message</span>
+```
+
+`aria-describedby` supplies a description, not a replacement for the button name. `data-ui-tooltip="delete-tip"` is also accepted as a visual tooltip contract. The page check verifies a tooltip reference, role, and text. The interaction check verifies hover, keyboard focus, Escape dismissal, and retained trigger focus. A `title` attribute alone does not meet the tooltip design rule. Visually hidden labels and symbol-only labels do not count as visible button text. Disabled buttons are excluded from the tooltip design rule. See [accessible names](https://www.w3.org/WAI/ARIA/apg/practices/names-and-descriptions/) and [tooltips](https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/).
+
+Mark disclosure buttons with `data-ui-disclosure`, set `aria-controls`, and update `aria-expanded` with panel visibility. Menu buttons and ARIA widgets also receive their applicable state checks. A collapsed popup may create its panel when opened; an engine result for that missing panel is reported as unresolved when the engine cannot decide. Check the open state as well.
+
+The normal CLI does not activate buttons, open dialogs, or change keyboard focus. Use an explicit interaction plan for these checks, with stable test data and actions that are safe to execute:
+
+```json
+{
+  "focus": [{ "selector": "#save" }],
+  "tooltips": [{ "trigger": "#delete", "tooltip": "#delete-tip" }],
+  "buttons": [{ "selector": "#save", "key": "Enter", "outcome": "#status", "expectedText": "Saved" }],
+  "dialogs": [{ "open": "#edit", "dialog": "#edit-dialog", "close": "#cancel" }],
+  "timeout": 1500,
+  "maxTabStops": 100
+}
+```
+
+```sh
+node bin/lintapple.js http://localhost:3000 --interactions interactions.json --json
+```
+
+Or call `checkInteractions(page, plan, policy)` from Playwright. It returns `findings`, `suppressed`, and `checks` with the rule, selector, phase, and status. Plans use CSS selectors in the main document. Each action selector must identify one element when used. A tooltip element must exist before its check. A dialog can be created by its open action. Plans run focus checks, tooltips, buttons, then dialogs in the listed order and change the page state. Use fresh fixtures or reset the page between separate plans.
+
+Button checks require `Enter` or `Space` and a declared result element with exact trimmed text. That text must not already be present before activation, so a stale success message cannot produce a pass. Test both keys in separate reset states for custom buttons. The plan activates each listed button once. Each dialog plan opens the dialog twice: once to test its close button and once to test Escape. It checks initial focus, forward and backward focus containment, and focus return. `returnFocus` can name a different logical workflow target. Moving to browser controls is not treated as focus escaping into background page content. See [modal dialog guidance](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/).
+
+Focus checks use real Tab navigation. The computed-style check detects common outlines, shadows, and color changes; a missing detectable indicator is unresolved because custom painted indicators need visual review. Occlusion checks use viewport bounds and hit-test samples. A fully covering opaque box is a failure; other covered samples are unresolved. These checks cannot prove indicator contrast, detect every painted overlay, or validate custom composite-widget arrow-key navigation.
+
+`accessibilityCoverage` records the page rules and the explicit interaction checks. Without a plan, interaction behavior is marked untested. A passing page check does not prove keyboard or dialog behavior or full accessibility. Check each route and relevant state.
 
 ## App states and CI
 
@@ -206,7 +296,14 @@ const result = await checkPage(page, policy);
 expect(result.findings).toEqual([]);
 ```
 
-For use inside this project, import from `./src/index.js`. This package is not yet published to npm. The CLI can run without package installation through `node bin/lintapple.js`.
+For use inside this project, import from `./src/index.js`. This package is not published to the npm registry. The production site provides a versioned package download:
+
+```sh
+npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.8.tgz
+npx playwright install chromium
+```
+
+The [production examples](https://lintapple-demo.vercel.app/demo/) cover the design and accessibility rules. `release.json` records the source commit and file checksums. `npm run release:build` makes the static deployment and package in `test-results/production-stage`. The CLI can also run without package installation through `node bin/lintapple.js`.
 
 Make the page checks required in your CI process. Use AGENTS.md to require the AI to use the layout primitives and fix failed checks. Keep policy changes under human review. A prompt alone does not enforce the policy.
 
@@ -215,11 +312,11 @@ Reports are stable for a stable page, policy, browser, fonts, and operating syst
 ## Limits
 
 - Checks cover visible DOM elements in the main document. They do not inspect shadow roots, iframes, canvas pixels, pseudo-element text, or off-screen application states.
-- Buttons are checked for hit area and spacing. Links and all accessibility rules are outside this version.
+- Buttons are checked for design hit area and spacing. Accessibility checks also cover named controls and links, with the scope and interaction limits described above.
 - A phrase list cannot decide whether all interface text is useful. Approved wording and human review are still needed.
 - A valid size can still be a poor design choice. Configure text roles for your product rather than using a broad size list alone.
 - Font requests and CSS declarations do not prove the font used for every glyph.
-- Radius, numeric, and control-inset checks need the stated contracts. A missing marker or container selector can leave a semantic check uncovered. The report includes element, control, inset-control, numeric, and radius counts so you can review coverage.
+- Radius, numeric, alignment, and control-inset checks need the stated contracts. A missing marker or container selector can leave a semantic check uncovered. The report includes element, control, inset-control, numeric, alignment, and radius counts so you can review coverage.
 - Pages with more than 5000 visible elements produce an execution error.
 
 No target app has been integrated with CI yet. The included tests prove the checker on its fixtures, not the design quality of another product.

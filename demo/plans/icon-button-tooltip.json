@@ -1,0 +1,10 @@
+{
+  "timeout": 300,
+  "maxTabStops": 12,
+  "tooltips": [
+    {
+      "trigger": "#tooltip-button",
+      "tooltip": "#action-tip"
+    }
+  ]
+}

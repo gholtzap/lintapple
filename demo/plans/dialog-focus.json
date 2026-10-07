@@ -1,0 +1,11 @@
+{
+  "timeout": 300,
+  "maxTabStops": 12,
+  "dialogs": [
+    {
+      "open": "#edit-open",
+      "dialog": "#edit-dialog",
+      "close": "#edit-cancel"
+    }
+  ]
+}

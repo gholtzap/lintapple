@@ -2,8 +2,11 @@ import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import axe from 'axe-core';
 import { audit } from './audit.js';
+import { auditAccessibility } from './accessibility.js';
+import { finding } from './report.js';
+import { runInteractions, validateInteractions } from './interactions.js';
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'text-contrast', 'font-loading'];
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'];
 export const defaultPolicy = JSON.parse(await readFile(new URL('../ui-policy.json', import.meta.url), 'utf8'));
 
 export function validatePolicy(input = {}) {
@@ -56,14 +59,21 @@ export async function checkPage(page, input = {}) {
   });
   // Keep the app's own axe object unchanged. Each check gets a fresh engine.
   const contrast = await page.evaluateHandle(`(() => { const previous = window.axe; ${axe.source}\n const engine = window.axe; window.axe = previous; return engine; })()`);
-  try { return await page.evaluate(audit, { policy, contrast }); }
-  finally { await contrast.dispose(); }
+  const accessibility = await page.evaluateHandle(`(${auditAccessibility.toString()})`);
+  const format = await page.evaluateHandle(`(${finding.toString()})`);
+  try { return await page.evaluate(audit, { policy, contrast, accessibility, format }); }
+  finally { await Promise.all([contrast.dispose(), accessibility.dispose(), format.dispose()]); }
 }
 
-export async function checkUrl(url, input = {}, { ready, timeout = 15000 } = {}) {
+export async function checkInteractions(page, plan, input = {}) {
+  return runInteractions(page, plan, validatePolicy(input));
+}
+
+export async function checkUrl(url, input = {}, { ready, timeout = 15000, interactions } = {}) {
   const parsed = new URL(url);
   if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) throw new Error('Use an HTTP, HTTPS, or file URL.');
   const policy = validatePolicy(input);
+  if (interactions) validateInteractions(interactions);
   const browser = await chromium.launch();
   const report = { url, rules: ruleIds, runs: [], findings: [] };
   try {
@@ -82,7 +92,14 @@ export async function checkUrl(url, input = {}, { ready, timeout = 15000 } = {})
             timer = setTimeout(() => reject(new Error('Page checks exceeded the time limit.')), timeout);
           })]);
         } finally { clearTimeout(timer); }
-        report.runs.push({ viewport, colorScheme, elements: result.elements, controls: result.controls, insetControls: result.insetControls, numericElements: result.numericElements, radiusContracts: result.radiusContracts, suppressed: result.suppressed });
+        if (interactions) {
+          const interaction = await checkInteractions(page, interactions, policy);
+          result.findings.push(...interaction.findings);
+          result.suppressed.push(...interaction.suppressed);
+          result.accessibilityCoverage.interactions = interaction.checks;
+          result.accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : 'not tested: empty interaction plan';
+        }
+        report.runs.push({ viewport, colorScheme, elements: result.elements, controls: result.controls, insetControls: result.insetControls, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed: result.suppressed, accessibilityCoverage: result.accessibilityCoverage });
         report.findings.push(...result.findings.map(f => ({ ...f, viewport, colorScheme })));
       } finally { await context.close(); }
     }

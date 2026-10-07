@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="See real interface errors and their fixes with lintapple.">
+    <title>lintapple — Interface rules</title>
+    <link rel="stylesheet" href="demo.css">
+    <link rel="stylesheet" href="tooltips.css">
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#/">lintapple</a>
+      <div class="header-actions ui-actions" data-ui-actions data-ui-container>
+        <a href="https://craft.gustavofior.com/" target="_blank" rel="noreferrer" aria-label="Open the Craft reference">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14 14 10M8 16l-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M16 8l2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(1 0) scale(.9)"/></svg>
+        </a>
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="Use light theme" data-ui-tooltip="theme-tooltip" aria-describedby="theme-tooltip">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+        </button>
+        <span class="ui-tooltip" id="theme-tooltip" role="tooltip" hidden>Use light theme</span>
+      </div>
+    </header>
+    <aside class="sidebar" aria-label="Rule navigation"></aside>
+    <main id="content"></main>
+  </body>
+</html>

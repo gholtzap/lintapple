@@ -1,0 +1,12 @@
+{
+  "timeout": 300,
+  "maxTabStops": 12,
+  "buttons": [
+    {
+      "selector": "#keyboard-button",
+      "key": "Enter",
+      "outcome": "#keyboard-result",
+      "expectedText": "Applied"
+    }
+  ]
+}
