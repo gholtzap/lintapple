@@ -1,0 +1,127 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { chromium } from 'playwright';
+import { checkPage } from '../src/index.js';
+
+const good = `<!doctype html><html lang="en"><style>
+html { background: #fafafa; font-family: system-ui; font-size: 16px; }
+body { margin: 24px; } h1 { font-size: 24px; }
+button { font: inherit; min-height: 40px; padding: 8px 16px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.number { font-variant-numeric: tabular-nums; text-align: right; }
+.outer { border: 2px solid #ddd; border-radius: 20px; padding: 6px; }
+.inner { border-radius: 12px; background: #eee; padding: 8px; }
+</style><body><h1>Project</h1><div class="actions"><button>Save</button><button>Cancel</button></div>
+<p class="number" data-ui-number>12,441</p><div class="outer" data-ui-radius><div class="inner" data-ui-radius-inner>Details</div></div>
+<p hidden style="font-family:serif;font-size:99px">Hidden content</p>
+<pre style="font-family:monospace;font-size:11px">code</pre></body></html>`;
+const bad = good.replace('background: #fafafa', 'background: transparent')
+  .replace('font-family: system-ui', 'font-family: serif').replace('font-size: 24px', 'font-size: 37px')
+  .replace('min-height: 40px; padding: 8px 16px', 'height: 14px; padding: 0')
+  .replace('gap: 8px', 'gap: 0px').replace('font-variant-numeric: tabular-nums', 'font-variant-numeric: normal')
+  .replace('border-radius: 12px', 'border-radius: 20px')
+  .replace('</body>', '<p>Unlock your potential</p><section data-ui-stack><p style="margin:0">First component</p><p style="margin:0">Second component</p></section><div style="width:2000px;height:1px"></div></body>');
+const edge = good.replace('font-size: 24px', 'font-size: 12px').replace('class="actions"', 'class="actions" data-ui-actions')
+  .replace('<h1>Project</h1>', '<h1><span>Project</span></h1>')
+  .replace('<button>Save</button><button>Cancel</button>', '<div><button>Save</button></div><div><button>Cancel</button></div>')
+  .replace('gap: 8px', 'gap: 0px')
+  .replace('</body>', '<p>Unlock <span>your</span> potential</p><table><tr><td>123</td></tr></table></body>');
+
+function cli(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['bin/lintapple.js', ...args]);
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => stdout += chunk);
+    child.stderr.on('data', chunk => stderr += chunk);
+    child.on('error', reject);
+    child.on('close', code => resolve({ code, stdout, stderr }));
+  });
+}
+
+test('CLI checks real pages, reports stable failures, and rejects invalid input', async () => {
+  const server = createServer((req, res) => {
+    if (req.url === '/missing' || req.url === '/invalid.woff2') { res.writeHead(404); return res.end('Missing'); }
+    res.setHeader('Content-Type', 'text/html');
+    const fontPage = good.replace('<style>', '<style>@font-face { font-family: broken; src: url("/invalid.woff2"); }').replace('font-family: system-ui', 'font-family: broken, system-ui');
+    const readyPage = good.replace('</body>', '<script>setTimeout(() => { document.querySelector("h1").style.fontSize = "37px"; document.body.setAttribute("data-app-ready", ""); }, 300);</script></body>');
+    res.end(req.url === '/bad' ? bad : req.url === '/edge' ? edge : req.url === '/font' ? fontPage : req.url === '/ready' ? readyPage : good);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const pass = await cli([url, '--json']);
+    assert.equal(pass.code, 0, pass.stderr);
+    const passed = JSON.parse(pass.stdout);
+    assert.equal(passed.findings.length, 0);
+    assert.equal(passed.runs.length, 2);
+    assert.ok(passed.runs.every(run => run.elements > 0));
+    const fail = await cli([`${url}/bad`, '--json']);
+    assert.equal(fail.code, 1, fail.stderr);
+    const report = JSON.parse(fail.stdout);
+    const expected = ['font-family', 'font-size', 'control-size', 'control-gap', 'layout-gap', 'tabular-numbers', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'text-contrast', 'copy'];
+    assert.deepEqual([...new Set(report.findings.map(f => f.rule))].sort(), expected.sort());
+    assert.ok(report.findings.every(f => f.selector && f.message && f.fix && f.viewport));
+    const repeated = JSON.parse((await cli([`${url}/bad`, '--json'])).stdout);
+    assert.deepEqual(repeated, report);
+    const edgeReport = JSON.parse((await cli([`${url}/edge`, '--json'])).stdout);
+    for (const rule of ['font-size', 'control-gap', 'copy', 'numeric-alignment', 'tabular-numbers'])
+      assert.ok(edgeReport.findings.some(f => f.rule === rule), `Missing edge check: ${rule}`);
+    assert.equal(edgeReport.findings.filter(f => f.rule === 'copy').length, 2, 'One copy finding per viewport');
+    const fontReport = JSON.parse((await cli([`${url}/font`, '--json'])).stdout);
+    assert.ok(fontReport.findings.some(f => f.rule === 'font-loading'));
+    const readyReport = JSON.parse((await cli([`${url}/ready`, '--ready', '[data-app-ready]', '--json'])).stdout);
+    assert.ok(readyReport.findings.some(f => f.rule === 'font-size'));
+    const missing = await cli([`${url}/missing`, '--json']);
+    assert.equal(missing.code, 2);
+    assert.match(missing.stderr, /404/);
+    await mkdir('test-results', { recursive: true });
+    await writeFile('test-results/bad-report.json', JSON.stringify(report, null, 2));
+    const policy = JSON.parse(await readFile('ui-policy.json', 'utf8'));
+    policy.exceptions = [{ selector: 'h1', rules: ['font-size'], reason: 'Test heading uses a separate size.' }];
+    await writeFile('test-results/policy.json', JSON.stringify(policy));
+    const excepted = JSON.parse((await cli([`${url}/bad`, '--config', 'test-results/policy.json', '--json'])).stdout);
+    assert.ok(!excepted.findings.some(f => f.rule === 'font-size'));
+    assert.ok(excepted.findings.some(f => f.rule === 'font-family'));
+    policy.exceptions[0].rules = ['typo'];
+    await writeFile('test-results/policy.json', JSON.stringify(policy));
+    const invalid = await cli([url, '--config', 'test-results/policy.json']);
+    assert.equal(invalid.code, 2);
+    assert.match(invalid.stderr, /Unknown rule/);
+    policy.exceptions[0].rules = ['font-size'];
+    policy.exceptions[0].selector = '[';
+    await writeFile('test-results/policy.json', JSON.stringify(policy));
+    assert.equal((await cli([url, '--config', 'test-results/policy.json'])).code, 2);
+    assert.equal((await cli([url, '--typo'])).code, 2);
+    const receipt = { command: 'npm test', inputs: 'test/check.test.js: good, bad, and edge-case HTML', expected: 'Good page passes. Bad page fails with twelve rule IDs. Repeat report is equal. Invalid input exits 2.', actual: 'All assertions passed.', environment: { node: process.version }, report: 'test-results/bad-report.json' };
+    await writeFile('test-results/receipt.json', JSON.stringify(receipt, null, 2));
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('page API checks an entered dialog state and both example themes', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.setContent(good.replace('<button>Save</button>', '<button onclick="document.querySelector(\'dialog\').showModal()">Save</button>').replace('</body>', '<dialog><h2 style="font-size:37px">New project</h2></dialog></body>'));
+    assert.equal((await checkPage(page)).findings.length, 0);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('dialog').waitFor();
+    assert.ok((await checkPage(page)).findings.some(f => f.rule === 'font-size' && f.selector.includes('h2')));
+    for (const colorScheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme });
+      await page.goto(new URL('../examples/good.html', import.meta.url).href);
+      const result = await checkPage(page);
+      assert.equal(result.findings.length, 0, JSON.stringify(result.findings));
+    }
+    await page.setContent(good);
+    const button = page.getByRole('button', { name: 'Save', exact: true });
+    await button.evaluate(el => { Object.assign(el.style, { width: '15px', height: '15px', minWidth: '0', minHeight: '0', padding: '0', border: '0' }); });
+    assert.ok(!(await checkPage(page)).findings.some(f => f.rule === 'control-size'), '15 × 15 px meets the default minimum');
+    await button.evaluate(el => { el.style.height = '14px'; });
+    assert.ok((await checkPage(page)).findings.some(f => f.rule === 'control-size' && f.expected.includes('15px')), 'A 14 px height fails');
+    await button.evaluate(el => { el.style.height = '15px'; el.style.width = '14px'; });
+    assert.ok((await checkPage(page)).findings.some(f => f.rule === 'control-size'), 'A 14 px width fails');
+  } finally { await browser.close(); }
+});

@@ -1,0 +1,29 @@
+{
+  "name": "lintapple",
+  "version": "0.1.7",
+  "description": "Check rendered interfaces against explicit design rules.",
+  "type": "module",
+  "bin": {
+    "lintapple": "./bin/lintapple.js",
+    "ui-lint": "./bin/lintapple.js"
+  },
+  "exports": "./src/index.js",
+  "files": [
+    "bin",
+    "src",
+    "ui-policy.json",
+    "examples",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "check": "node bin/lintapple.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "axe-core": "4.14.0",
+    "playwright": "^1.58.0"
+  }
+}
