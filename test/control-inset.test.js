@@ -20,6 +20,8 @@ test('control inset checks rendered edges, borders, wrappers, selectors, and exc
       await page.setViewportSize({ width, height: 900 });
       const cases = [
         { name: '8 px padding', html: fixture(), edges: [] },
+        { name: 'fractional width and full-width button', html: fixture('width:160.4px;', 'width:100%;'), edges: [] },
+        { name: 'fractional width without a border', html: fixture('width:175.40625px;border:0;', 'width:100%;'), edges: [] },
         { name: 'border cannot replace padding', html: fixture('padding: 0;'), edges: ['left', 'top', 'bottom'] },
         { name: '7 px padding fails', html: fixture('padding: 7px;'), edges: ['left', 'top', 'bottom'] },
         { name: 'absolute left', html: fixture('height: 100px;', 'position: absolute; left: 0; top: 8px;'), edges: ['left'] },

@@ -144,7 +144,9 @@ export async function audit({ policy, contrast, accessibility, format }) {
   // One client-box primitive for control insets and text clipping.
   const clientBounds = container => {
     const bounds = container.getBoundingClientRect();
-    const { x: scaleX, y: scaleY } = scaleFor(container);
+    // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
+    const scaleX = bounds.width / container.offsetWidth;
+    const scaleY = bounds.height / container.offsetHeight;
     const left = bounds.left + container.clientLeft * scaleX;
     const top = bounds.top + container.clientTop * scaleY;
     const result = { left, top, right: left + container.clientWidth * scaleX, bottom: top + container.clientHeight * scaleY };
