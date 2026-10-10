@@ -1,6 +1,6 @@
 {
   "command": "npm run demo:check",
-  "origin": "http://127.0.0.1:58882",
+  "origin": "http://127.0.0.1:63390",
   "policy": "ui-policy.json",
   "examples": [
     {

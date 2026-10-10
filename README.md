@@ -133,7 +133,7 @@ These rules run through `checkPage`, `checkUrl`, and the `lintapple` command. Al
 </main>
 ```
 
-The radius contract is for a visible direct child, equal insets, and equal circular pixel radii. It includes the parent border in the measured inset. Unsupported shapes fail the contract. Do not mark surfaces whose corners do not follow each other.
+The radius contract is for a visible direct child, equal insets, and equal circular pixel radii. It includes the parent border in the measured inset. Uniform scale is supported: radii and insets are compared in rendered pixels, with a 1 px tolerance. Nonuniform scale produces elliptical corners and fails the circular radius contract. Unsupported shapes fail the contract. Do not mark surfaces whose corners do not follow each other.
 
 Gap checks compare child boxes that overlap along one axis. They support rows, columns, wrapping, and grids. They do not judge diagonal spacing or arbitrary relationships between unmarked components.
 
@@ -184,7 +184,7 @@ The rule measures all four edges of the container's client box, excluding border
 
 `viewport-bounds` runs without markers. It checks rendered element boxes and text line boxes against the CSS layout viewport, with a 1 px tolerance. Normal page content can extend below the screen and remain available through vertical scrolling. Fixed elements, open `dialog` elements, and elements with `role="dialog"`, `role="alertdialog"`, or `data-ui-overlay` must fit vertically too. Their descendants must fit unless a local scroll region provides access to that content.
 
-Local regions with `overflow: auto` or `scroll` can contain wider or taller content. The scroll region itself must fit the screen. Page-level scrolling does not exempt horizontal overflow. Content clipped by an inner container is checked against its painted bounds for viewport errors. Root overflow hiding does not hide a screen-bound error.
+Local regions with `overflow: auto` or `scroll` can contain wider or taller content. The scroll region itself must fit the screen. An absolute-positioned element can escape a scroll ancestor when its containing block is outside that ancestor. That ancestor does not exempt the element from bounds checks. Page-level scrolling does not exempt horizontal overflow. Content clipped by an inner container is checked against its painted bounds for viewport errors. Root overflow hiding does not hide a screen-bound error.
 
 Mark an HTML text container with `data-ui-content` to check visible text against its inner edges. `content-overflow` checks the nearest marked container, including text that stays on screen but extends past a card edge. Borders do not count as space for text. Wrapping and local scrolling inside the marked container are allowed. Scrolling outside that container does not permit text to escape it.
 
@@ -209,6 +209,8 @@ These are DOM geometry checks. Text painted by pseudo-elements, native input val
 The `text-contrast` rule uses the pinned axe-core contrast engine. It follows [WCAG contrast minimum](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html): 4.5:1 for normal text and 3:1 for large text. Large text is at least 24 CSS px, or about 18.67 CSS px with a font weight of at least 700. The pass decision uses the calculated ratio. The displayed ratio is truncated to two decimal places.
 
 The engine handles inherited backgrounds, transparent colors, opacity groups, and many overlapping layers. The checker also tests visible empty-input placeholders with axe-core's color and background utilities. Placeholder effects involving ancestor opacity, filters, blend modes, or text shadows produce an unresolved finding instead of an estimated pass. Disabled controls are excluded from the contrast requirement.
+
+Visible direct text is checked even when its element has no layout box, such as `display: contents`. Boxless text uses the engine's color utilities and a containing ancestor background. Effects, overlapping boxes, or backgrounds that cannot be measured produce an unresolved finding. Hidden and inert text is excluded.
 
 Findings have `status: "failed"` for measured failures, with `contrastRatio`, `requiredContrastRatio`, `foreground`, and `background`. Cases that the engine cannot measure have `status: "unresolved"` and an explanation. Both statuses fail the CLI with exit code `1`. Background images, complex effects, and some gradients can require review. Use the existing scoped exception format to record the reason after review.
 
@@ -406,7 +408,7 @@ This repository includes a working example in `examples/playwright/`. Run `npm r
 For direct page checks inside this project, import `checkPage` from `./src/index.js`. The production site also provides a versioned package download:
 
 ```sh
-npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.11.tgz
+npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.12.tgz
 ```
 
 The [production examples](https://lintapple-demo.vercel.app/demo/) cover the design and accessibility rules. `release.json` records the source commit and file checksums. `npm run release:build` makes the static deployment and package in `test-results/production-stage`. The CLI can also run without package installation through `node bin/lintapple.js`.

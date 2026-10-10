@@ -19,7 +19,28 @@ export async function audit({ policy, contrast, accessibility, format }) {
     findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
   const suppressed = [];
-  const visible = el => !el.closest('[inert]') && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+  const textRects = el => {
+    const rects = [];
+    for (const node of el.childNodes) {
+      if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      rects.push(...[...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0));
+    }
+    return rects;
+  };
+  const visible = el => {
+    if (el.closest('[inert]')) return false;
+    const bounds = el.getBoundingClientRect();
+    if (el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && bounds.width > 0 && bounds.height > 0) return true;
+    if (getComputedStyle(el).visibility !== 'visible' || !textRects(el).length) return false;
+    // Boxless elements can paint text. Opacity applies only to ancestor boxes.
+    for (let node = el; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.contentVisibility === 'hidden' || (style.display !== 'contents' && parseFloat(style.opacity) === 0)) return false;
+    }
+    return true;
+  };
   const elements = [...document.querySelectorAll('body, body *')].filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
@@ -111,11 +132,19 @@ export async function audit({ policy, contrast, accessibility, format }) {
     right: outer.right - inner.right,
     bottom: outer.bottom - inner.bottom,
   });
+  const scaleFor = container => {
+    const bounds = container.getBoundingClientRect();
+    const style = styles.get(container) ?? getComputedStyle(container);
+    const length = axis => {
+      const edges = axis === 'width' ? ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] : ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'];
+      return parseFloat(style[axis]) + (style.boxSizing === 'border-box' ? 0 : edges.reduce((sum, key) => sum + parseFloat(style[key]), 0));
+    };
+    return { x: bounds.width / (length('width') || container.offsetWidth), y: bounds.height / (length('height') || container.offsetHeight) };
+  };
   // One client-box primitive for control insets and text clipping.
   const clientBounds = container => {
     const bounds = container.getBoundingClientRect();
-    const scaleX = bounds.width / container.offsetWidth;
-    const scaleY = bounds.height / container.offsetHeight;
+    const { x: scaleX, y: scaleY } = scaleFor(container);
     const left = bounds.left + container.clientLeft * scaleX;
     const top = bounds.top + container.clientTop * scaleY;
     const result = { left, top, right: left + container.clientWidth * scaleX, bottom: top + container.clientHeight * scaleY };
@@ -141,18 +170,20 @@ export async function audit({ policy, contrast, accessibility, format }) {
     const corners = ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'];
     const outerValues = corners.map(key => styles.get(outer)[key]);
     const innerValues = corners.map(key => getComputedStyle(inner)[key]);
-    if (insets.some(n => n < 0 || Math.abs(n - insets[0]) > 1) || [...outerValues, ...innerValues].some(n => !/^\d+(?:\.\d+)?px$/.test(n)) || new Set(outerValues).size !== 1 || new Set(innerValues).size !== 1) {
+    const outerScale = scaleFor(outer), innerScale = scaleFor(inner);
+    if ([outerScale, innerScale].some(scale => !Number.isFinite(scale.x) || !Number.isFinite(scale.y) || Math.abs(scale.x - scale.y) > 0.01) || insets.some(n => n < 0 || Math.abs(n - insets[0]) > 1) || [...outerValues, ...innerValues].some(n => !/^\d+(?:\.\d+)?px$/.test(n)) || new Set(outerValues).size !== 1 || new Set(innerValues).size !== 1) {
       add('nested-radius', outer, 'unequal insets or unsupported corner shapes', 'equal insets and circular pixel radii', 'Use this contract only for concentric, equally inset surfaces. Use a reasoned exception for other shapes.');
       continue;
     }
-    const expected = Math.max(0, parseFloat(outerValues[0]) - insets[0]);
-    if (Math.abs(parseFloat(innerValues[0]) - expected) > 1)
-      add('nested-radius', inner, innerValues[0], `${Number(expected.toFixed(2))}px inner radius`, 'Set the inner radius to max(0px, outer radius minus the inset). The inset includes the border.');
+    const expected = Math.max(0, parseFloat(outerValues[0]) * outerScale.x - insets[0]);
+    if (Math.abs(parseFloat(innerValues[0]) * innerScale.x - expected) > 1)
+      add('nested-radius', inner, innerValues[0], `${Number((expected / innerScale.x).toFixed(2))}px inner radius`, 'Set the inner radius to max(0px, outer radius minus the inset). The inset includes the border.');
   }
   const styleOf = el => styles.get(el) ?? getComputedStyle(el);
-  const scrolls = (node, axis) => /^(auto|scroll)$/.test(styleOf(node)[`overflow${axis}`]);
-  const scrollsWithin = (el, clip, axis) => {
-    for (let node = el; node && node !== clip.element; node = node.parentElement) {
+  const scrolls = (node, axis) => !['inline', 'contents'].includes(styleOf(node).display) && /^(auto|scroll)$/.test(styleOf(node)[`overflow${axis}`]);
+  const scrollsWithin = (ancestors, clip, axis) => {
+    for (const node of ancestors) {
+      if (node === clip.element || !clip.element.contains(node)) break;
       if (!scrolls(node, axis)) continue;
       const bounds = node.getBoundingClientRect();
       const edges = axis === 'X' ? ['left', 'right'] : ['top', 'bottom'];
@@ -163,10 +194,16 @@ export async function audit({ policy, contrast, accessibility, format }) {
   const viewport = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: document.documentElement.clientHeight };
   const contextFor = el => {
     const ancestors = [];
+    let containingBlock = null;
+    let overlay = false;
     for (let node = el; node; node = node.parentElement) {
+      overlay ||= styleOf(node).position === 'fixed' || node.matches('dialog[open], [role="dialog"], [role="alertdialog"], [data-ui-overlay]');
+      // Overflow below an absolute box's containing block cannot clip that box.
+      if (containingBlock && node !== containingBlock) continue;
       ancestors.push(node);
       // A viewport-fixed box escapes ordinary ancestor scrolling and clipping.
       if (styleOf(node).position === 'fixed') break;
+      containingBlock = styleOf(node).position === 'absolute' ? node.offsetParent ?? document.documentElement : null;
     }
     const clips = ancestors.filter(node => node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => ({
       element: node,
@@ -174,8 +211,9 @@ export async function audit({ policy, contrast, accessibility, format }) {
       y: /^(hidden|clip)$/.test(styleOf(node).overflowY),
     })).filter(clip => clip.x || clip.y).map(clip => ({ ...clip, bounds: clientBounds(clip.element) }));
     return {
+      ancestors,
       clips,
-      overlay: ancestors.some(node => styleOf(node).position === 'fixed' || node.matches('dialog[open], [role="dialog"], [role="alertdialog"], [data-ui-overlay]')),
+      overlay,
       boxScrollX: ancestors.slice(1).some(node => scrolls(node, 'X') && node !== document.body && node !== document.documentElement),
       boxScrollY: ancestors.slice(1).some(node => scrolls(node, 'Y') && node !== document.body && node !== document.documentElement),
       textScrollX: ancestors.some(node => scrolls(node, 'X') && node !== document.body && node !== document.documentElement),
@@ -191,16 +229,6 @@ export async function audit({ policy, contrast, accessibility, format }) {
       if (clip.y) { result.top = Math.max(result.top, clip.bounds.top); result.bottom = Math.min(result.bottom, clip.bounds.bottom); }
     }
     return result;
-  };
-  const textRects = el => {
-    const rects = [];
-    for (const node of el.childNodes) {
-      if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()) continue;
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      rects.push(...[...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0));
-    }
-    return rects;
   };
   for (const el of elements.filter(el => el instanceof HTMLElement || el.tagName.toLowerCase() === 'svg')) {
     const context = contextFor(el);
@@ -218,8 +246,8 @@ export async function audit({ policy, contrast, accessibility, format }) {
     if (container && rects.length) {
       const contract = { element: container, bounds: clientBounds(container) };
       const overflow = new Map();
-      const checkX = !scrolls(container, 'X') && !scrollsWithin(el, contract, 'X');
-      const checkY = !scrolls(container, 'Y') && !scrollsWithin(el, contract, 'Y');
+      const checkX = !(context.ancestors.includes(container) && scrolls(container, 'X')) && !scrollsWithin(context.ancestors, contract, 'X');
+      const checkY = !(context.ancestors.includes(container) && scrolls(container, 'Y')) && !scrollsWithin(context.ancestors, contract, 'Y');
       for (const rect of rects) {
         const painted = clippedRect(rect, context.clips, el, true);
         if (painted.left >= painted.right || painted.top >= painted.bottom) continue;
@@ -231,7 +259,7 @@ export async function audit({ policy, contrast, accessibility, format }) {
     }
     for (const clip of context.clips) {
       const cut = new Map();
-      for (const rect of rects) for (const [edge, distance] of outside(clip.bounds, rect, clip.x && !scrollsWithin(el, clip, 'X'), clip.y && !scrollsWithin(el, clip, 'Y')))
+      for (const rect of rects) for (const [edge, distance] of outside(clip.bounds, rect, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y')))
         cut.set(edge, Math.max(cut.get(edge) ?? 0, -distance));
       if (cut.size)
         add('content-clipping', el, [...cut].map(([edge, amount]) => `${edge} text clipping ${Number(amount.toFixed(2))}px`).join(', '), 'text lines inside the clipping area', 'Allow text to wrap, increase the container size, or provide a local scroll region. Use a reasoned exception for intentional truncation.', clip.element);
@@ -278,6 +306,47 @@ export async function audit({ policy, contrast, accessibility, format }) {
   // Use its color and background primitives without changing form values.
   contrast.setup(document);
   try {
+    for (const el of elements.filter(el => textRects(el).length && (!el.getBoundingClientRect().width || !el.getBoundingClientRect().height) && !el.closest(':disabled, [aria-disabled="true"]'))) {
+      const style = styles.get(el);
+      const required = parseFloat(style.fontSize) >= 24 || (parseFloat(style.fontWeight) >= 700 && parseFloat(style.fontSize) >= 56 / 3) ? 3 : 4.5;
+      const data = { expectedContrastRatio: `${required}:1` };
+      const rects = textRects(el);
+      let box = el.parentElement, unsupported = false;
+      while (box && rects.some(rect => outside(box.getBoundingClientRect(), rect, true, true).length)) box = box.parentElement;
+      for (let node = el; node; node = node.parentElement) {
+        const nodeStyle = styleOf(node);
+        if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal' || nodeStyle.textShadow !== 'none' || parseFloat(nodeStyle.webkitTextStrokeWidth) > 0) unsupported = true;
+        if (box && node !== box && box.contains(node) && nodeStyle.display !== 'contents') {
+          const bounds = node.getBoundingClientRect();
+          if (rects.some(rect => bounds.left < rect.right && bounds.right > rect.left && bounds.top < rect.bottom && bounds.bottom > rect.top)) {
+            try { if (nodeStyle.backgroundImage !== 'none' || new contrast.commons.color.Color().parseString(nodeStyle.backgroundColor).alpha > 0) unsupported = true; }
+            catch { unsupported = true; }
+          }
+        }
+        for (const pseudo of ['::before', '::after']) {
+          if (!['none', 'normal'].includes(getComputedStyle(node, pseudo).content)) unsupported = true;
+        }
+      }
+      // The ancestor background is valid only when no other painted box overlaps the text.
+      if (elements.some(node => node !== el && !node.contains(el) && rects.some(rect => {
+        const bounds = node.getBoundingClientRect();
+        return bounds.width > 0 && bounds.height > 0 && bounds.left < rect.right && bounds.right > rect.left && bounds.top < rect.bottom && bounds.bottom > rect.top;
+      }))) unsupported = true;
+      if (!box || unsupported) { reportContrast(el, 'unresolved', data, 'boxless text effects or background layers need review'); continue; }
+      try {
+        let background = contrast.commons.color.getBackgroundColor(box);
+        if (!background && box === root && styleOf(root).backgroundImage === 'none') {
+          background = new contrast.commons.color.Color().parseString(styleOf(root).backgroundColor);
+          if (background.alpha !== 1) background = null;
+        }
+        if (!background) { reportContrast(el, 'unresolved', data, 'boxless text background needs review'); continue; }
+        const foreground = new contrast.commons.color.Color().parseString(style.webkitTextFillColor || style.color);
+        const blended = contrast.commons.color.flattenColors(foreground, background);
+        const ratio = contrast.commons.color.getContrast(background, blended);
+        if (!Number.isFinite(ratio)) { reportContrast(el, 'unresolved', data, 'boxless text color could not be parsed'); continue; }
+        if (ratio < required) reportContrast(el, 'failed', { ...data, contrastRatio: Math.floor(ratio * 100) / 100, fgColor: blended.toHexString(), bgColor: background.toHexString() });
+      } catch (error) { reportContrast(el, 'unresolved', data, `boxless text calculation failed: ${error.message}`); }
+    }
     for (const el of elements.filter(el => el.matches('input:placeholder-shown, textarea:placeholder-shown') && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'))) {
       const style = getComputedStyle(el, '::placeholder');
       const size = parseFloat(style.fontSize), bold = parseFloat(style.fontWeight) >= 700;
