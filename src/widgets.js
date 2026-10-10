@@ -35,11 +35,11 @@ function hasFocus(selector) {
   return active === el || (active?.contains(el) && el.id && active.getAttribute('aria-activedescendant') === el.id);
 }
 
-function widgetState({ selector, kind, selected, checked = [] }) {
+function widgetState({ selector, kind, selected, checked = [], visibility }) {
   const root = document.querySelector(selector), errors = [];
   if (!root) return kind === 'menus' && !checked.length ? [] : ['The declared widget or checked states are absent.'];
   if (!(kind === 'tabs' ? root.getAttribute('role') === 'tablist' : ['menu', 'menubar'].includes(root.getAttribute('role')))) return ['The widget role changed or is invalid.'];
-  const visible = el => !!el && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && !!el.getBoundingClientRect().width && !!el.getBoundingClientRect().height && !el.closest('[inert]');
+  const { hasVisibleContent: visible } = visibility;
   if (kind === 'tabs') {
     const tabs = [...root.querySelectorAll('[role="tab"]')].filter(el => el.closest('[role="tablist"]') === root);
     const active = tabs.filter(el => el.getAttribute('aria-selected') === 'true');
@@ -85,7 +85,7 @@ function widgetState({ selector, kind, selected, checked = [] }) {
   return errors;
 }
 
-export async function runWidgets(page, plan, { target, record, wait, reach, shown, hidden, inspect }) {
+export async function runWidgets(page, plan, { target, record, wait, reach, shown, hidden, inspect, createVisibility }) {
   for (const kind of ['tabs', 'menus']) for (const [widgetIndex, item] of plan[kind].entries()) {
     // Validate every declared selector before this widget changes page state.
     const selectors = [item.selector, item.open, ...item.steps.flatMap(step => [step.focus, step.selected, step.outcome, ...(step.checked || []).map(state => state.selector)])].filter(Boolean);
@@ -109,19 +109,20 @@ export async function runWidgets(page, plan, { target, record, wait, reach, show
     await record('control-state', item.selector, validRole, `widget role is ${role}`, kind === 'tabs' ? 'role="tablist"' : item.open ? 'role="menu"' : 'role="menu" or "menubar"', 'Use the correct widget role.', { phase: 'widget-role' });
     if (!validRole) continue;
     const stateHandle = await page.evaluateHandle(`(${widgetState.toString()})`);
+    const visibility = await page.evaluateHandle(`(${createVisibility.toString()})()`);
     try {
       // A handle keeps the app's global objects unchanged.
       const checkState = async (phase, step = {}) => {
-        const witness = { selector: item.selector, kind, selected: step.selected, checked: step.checked };
+        const witness = { selector: item.selector, kind, selected: step.selected, checked: step.checked, visibility };
         const passed = await wait(({ fn, witness }) => fn(witness).length === 0, { fn: stateHandle, witness });
         const errors = passed ? [] : await page.evaluate(widgetState, witness);
         await record('control-state', item.selector, passed, errors.join(' ') || 'widget state did not settle within the configured limit', 'valid widget selection and linked content', 'Update the declared selection, checked states, and panel visibility together.', { phase, ...(!passed && !errors.length ? { status: 'unresolved' } : {}) });
         if (opener) {
-          const expanded = await wait(({ open, menu }) => {
+          const expanded = await wait(({ open, menu, visibility }) => {
             const trigger = document.querySelector(open), panel = document.querySelector(menu);
-            const visible = !!panel && panel.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && !!panel.getBoundingClientRect().width && !!panel.getBoundingClientRect().height;
+            const visible = visibility.hasVisibleContent(panel);
             return ['true', 'menu'].includes(trigger?.getAttribute('aria-haspopup')) && trigger.getAttribute('aria-expanded') === String(visible);
-          }, { open: item.open, menu: item.selector });
+          }, { open: item.open, menu: item.selector, visibility });
           await record('control-state', item.open, expanded, 'menu opener state does not match menu visibility', 'aria-haspopup and aria-expanded to match the menu', 'Set aria-haspopup="menu" and update aria-expanded when the menu opens or closes.', { phase });
         }
       };
@@ -187,14 +188,29 @@ export async function runWidgets(page, plan, { target, record, wait, reach, show
         const closingMenu = kind === 'menus' && ['Escape', 'Tab', 'Shift+Tab'].includes(step.key) ? await page.evaluateHandle(({ selector, key }) => {
           const root = document.querySelector(selector), active = document.activeElement;
           const el = active?.getAttribute('aria-activedescendant') ? document.getElementById(active.getAttribute('aria-activedescendant')) : active;
-          return key === 'Escape' ? el?.closest('[role="menu"]') : (root.getAttribute('role') === 'menu' ? root : el?.closest('[role="menu"]'));
+          const menu = key === 'Escape' ? el?.closest('[role="menu"]') : (root.getAttribute('role') === 'menu' ? root : el?.closest('[role="menu"]'));
+          return { menu, id: menu?.id, root: menu === root };
         }, { selector: item.selector, key: step.key }) : null;
         try {
           await page.keyboard.press(step.key);
           const moved = await wait(hasFocus, step.focus);
           await record('keyboard-operation', item.selector, moved, `${step.key} did not focus ${step.focus}`, `${step.key} to focus ${step.focus}`, 'Handle the declared key and update focus or aria-activedescendant.', { phase, focusSelector: step.focus });
           await checkState(phase, step);
-          if (closingMenu) await record('keyboard-operation', item.selector, await wait(el => !el || !el.isConnected || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) || !el.getBoundingClientRect().width || !el.getBoundingClientRect().height, closingMenu), 'the exit key left the menu open', `${step.key} to close the menu`, 'Close the menu and put focus on the declared return control.', { phase });
+          if (closingMenu) {
+            const closure = ({ closing, selector, visibility }) => {
+              if (!closing.menu) return 'passed';
+              const current = closing.menu.isConnected ? closing.menu : closing.root ? document.querySelector(selector) : closing.id ? document.getElementById(closing.id) : null;
+              if (!current && !closing.root && !closing.id) return 'unresolved';
+              return visibility.hasVisibleContent(current) ? 'failed' : 'passed';
+            };
+            const witness = { closing: closingMenu, selector: item.selector, visibility };
+            const closureHandle = await page.evaluateHandle(`(${closure.toString()})`);
+            let closed;
+            try { closed = await wait(value => value.fn(value.witness) === 'passed', { fn: closureHandle, witness }); }
+            finally { await closureHandle.dispose(); }
+            const status = closed ? 'passed' : await page.evaluate(closure, witness);
+            await record('keyboard-operation', item.selector, status === 'passed', status === 'unresolved' ? 'the removed submenu has no stable ID to check its replacement' : 'the exit key left the menu open', `${step.key} to close the menu`, 'Close the menu and put focus on the declared return control. Give replaced submenus stable IDs.', { phase, status });
+          }
           if (previousChoices) {
             const unchanged = await page.evaluate(({ states, selector }) => {
               const root = document.querySelector(selector);
@@ -215,6 +231,6 @@ export async function runWidgets(page, plan, { target, record, wait, reach, show
           if (!moved) break;
         } finally { if (previousChoices) await previousChoices.dispose(); if (closingMenu) await closingMenu.dispose(); }
       }
-    } finally { await stateHandle.dispose(); }
+    } finally { await Promise.all([stateHandle.dispose(), visibility.dispose()]); }
   }
 }

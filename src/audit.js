@@ -1,5 +1,5 @@
 // Runs in the browser. Use one report shape for all design rules.
-export async function audit({ policy, contrast, accessibility, format }) {
+export async function audit({ policy, contrast, accessibility, format, visibility }) {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   const findings = [];
@@ -19,28 +19,7 @@ export async function audit({ policy, contrast, accessibility, format }) {
     findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
   const suppressed = [];
-  const textRects = el => {
-    const rects = [];
-    for (const node of el.childNodes) {
-      if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()) continue;
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      rects.push(...[...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0));
-    }
-    return rects;
-  };
-  const visible = el => {
-    if (el.closest('[inert]')) return false;
-    const bounds = el.getBoundingClientRect();
-    if (el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && bounds.width > 0 && bounds.height > 0) return true;
-    if (getComputedStyle(el).visibility !== 'visible' || !textRects(el).length) return false;
-    // Boxless elements can paint text. Opacity applies only to ancestor boxes.
-    for (let node = el; node; node = node.parentElement) {
-      const style = getComputedStyle(node);
-      if (style.display === 'none' || style.contentVisibility === 'hidden' || (style.display !== 'contents' && parseFloat(style.opacity) === 0)) return false;
-    }
-    return true;
-  };
+  const { textRects, visible, hasVisibleContent } = visibility;
   const elements = [...document.querySelectorAll('body, body *')].filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
@@ -104,7 +83,7 @@ export async function audit({ policy, contrast, accessibility, format }) {
   for (const el of elements.filter(el => el.matches('[data-ui-stack]')))
     checkGap([...el.children].filter(visible), 'layout-gap', policy.minLayoutGap);
   let alignmentGroups = 0;
-  for (const group of elements.filter(el => el.matches('[data-ui-align]'))) {
+  for (const group of [...document.querySelectorAll('[data-ui-align]')].filter(hasVisibleContent)) {
     const alignment = group.getAttribute('data-ui-align');
     const items = [...group.querySelectorAll('[data-ui-align-item]')].filter(el => el.closest('[data-ui-align]') === group);
     if (!['start', 'center', 'end'].includes(alignment) || items.length < 2) {
@@ -114,7 +93,7 @@ export async function audit({ policy, contrast, accessibility, format }) {
     const targets = items.filter(visible);
     if (targets.length < 2) continue;
     alignmentGroups++;
-    const rtl = styles.get(group).direction === 'rtl';
+    const rtl = getComputedStyle(group).direction === 'rtl';
     const position = element => {
       const rect = element.getBoundingClientRect();
       return alignment === 'center' ? (rect.left + rect.right) / 2 : rect[(alignment === 'start') !== rtl ? 'left' : 'right'];
@@ -375,6 +354,6 @@ export async function audit({ policy, contrast, accessibility, format }) {
       } catch (error) { reportContrast(el, 'unresolved', data, `placeholder calculation failed: ${error.message}`); }
     }
   } finally { contrast.teardown(); }
-  const accessibilityCoverage = await accessibility({ elements, controls, visible, add, engine: contrast });
+  const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
   return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }

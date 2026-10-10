@@ -1,5 +1,5 @@
 // Runs in the browser with the same scope and report helpers as the layout audit.
-export async function auditAccessibility({ elements, controls, visible, add, engine }) {
+export async function auditAccessibility({ elements, controls, visible, hasVisibleContent, add, engine }) {
   const rules = {
     'button-name': 'accessible-name', 'input-button-name': 'accessible-name',
     'input-image-alt': 'accessible-name', 'aria-tab-name': 'accessible-name',
@@ -69,7 +69,7 @@ export async function auditAccessibility({ elements, controls, visible, add, eng
           const id = el.getAttribute('aria-controls');
           const panel = document.getElementById(id);
           if (!id?.trim() || (!panel && el.getAttribute('aria-expanded') !== 'false')) add('control-state', el, 'no controlled panel', 'aria-controls naming the disclosure panel', 'Connect the disclosure button to its panel.', null, { status: 'failed', category: 'accessibility' });
-          if (panel && ['true', 'false'].includes(el.getAttribute('aria-expanded')) && (el.getAttribute('aria-expanded') === 'true') !== visible(panel)) add('control-state', el, 'aria-expanded does not match panel visibility', 'expanded state matching the controlled panel', 'Update aria-expanded and panel visibility together.', panel, { status: 'failed', category: 'accessibility' });
+          if (panel && ['true', 'false'].includes(el.getAttribute('aria-expanded')) && (el.getAttribute('aria-expanded') === 'true') !== hasVisibleContent(panel)) add('control-state', el, 'aria-expanded does not match panel visibility', 'expanded state matching the controlled panel', 'Update aria-expanded and panel visibility together.', panel, { status: 'failed', category: 'accessibility' });
         }
       }
     }

@@ -1,6 +1,6 @@
 {
   "name": "lintapple",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Check rendered interfaces against explicit design rules.",
   "type": "module",
   "bin": {

@@ -157,6 +157,8 @@ The heading margin matches the existing action container's 8 px padding. This ke
 
 This rule checks only marked element boxes. It does not compare glyph edges, text baselines, or optical alignment. Use it for axis-aligned elements. Mark only the items that must align; other layouts remain valid.
 
+The group wrapper can use `display: contents` or have no height. Its visible marked items still receive alignment checks.
+
 ### Control insets
 
 Mark the containing surface with `data-ui-container`. Every visible descendant button is checked against its nearest configured ancestor, including buttons inside wrapper elements. The report names the button, the container, the failing edge, and the measured distance. Absolute positioning, negative margins, and translated buttons cannot hide a small inset behind a CSS padding declaration.
@@ -269,6 +271,8 @@ For an icon button, provide a text tooltip as well as an accessible name:
 
 Mark disclosure buttons with `data-ui-disclosure`, set `aria-controls`, and update `aria-expanded` with panel visibility. Menu buttons and ARIA widgets also receive their applicable state checks. A collapsed popup may create its panel when opened; an engine result for that missing panel is reported as unresolved when the engine cannot decide. Unique references to existing `role="menu"` targets resolve the engine's popup-reference uncertainty. Missing, ambiguous, or wrong-role targets still require review. Check the open state as well.
 
+Panel visibility includes visible child content. A panel with `display: contents` or zero height can still be expanded when its children are visible.
+
 The normal CLI does not activate buttons, open dialogs, or change keyboard focus. Use an explicit interaction plan for these checks, with stable test data and actions that are safe to execute:
 
 ```json
@@ -331,6 +335,8 @@ The accepted step keys are `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `H
 For checkbox or radio activation, `checked` must include the activated item and its expected value. Use booleans, or `"mixed"` for a checkbox. For an enabled checkbox, the expected state must differ before activation. For an enabled radio item, activation must set its checked state to true. Radio checks also reject multiple checked items in a group. Groups use `role="group"`, or separators within the same menu. Navigation keys must keep existing checked states unchanged. To verify an action item, declare `outcome` and `expectedText`, as in button plans. The result must differ before activation. A submenu action can instead declare focus on its child item. An action without a result cannot prove activation and is rejected.
 
 Findings use the existing `keyboard-operation` and `control-state` rules, scoped exceptions, and coverage reports. Page checks also run after menu opening and each key step. Steps stop after a focus failure so that later keys cannot activate unrelated controls. The checker tests only declared keys and states; it does not prove complete widget behavior. It checks DOM descendants in the main document, not shadow roots, frames, or items attached through `aria-owns`. Use separate plans for separate popup menus. See the W3C [tabs](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/), [menu and menubar](https://www.w3.org/WAI/ARIA/apg/patterns/menubar/), and [menu button](https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/) patterns.
+
+Exit checks inspect the current menu after Escape, Tab, or Shift+Tab. A visible replacement cannot pass because the old node was removed. Give nested menus stable IDs if the app removes or replaces them. A removed nested menu without an ID produces an unresolved result because the checker cannot identify its replacement.
 
 `accessibilityCoverage` records the page rules and the explicit interaction checks. Without a plan, interaction behavior is marked untested. A passing page check does not prove keyboard or dialog behavior or full accessibility. Check each route and relevant state.
 
@@ -408,7 +414,7 @@ This repository includes a working example in `examples/playwright/`. Run `npm r
 For direct page checks inside this project, import `checkPage` from `./src/index.js`. The production site also provides a versioned package download:
 
 ```sh
-npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.13.tgz
+npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.14.tgz
 ```
 
 The [production examples](https://lintapple-demo.vercel.app/demo/) cover the design and accessibility rules. `release.json` records the source commit and file checksums. `npm run release:build` makes the static deployment and package in `test-results/production-stage`. The CLI can also run without package installation through `node bin/lintapple.js`.

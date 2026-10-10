@@ -5,6 +5,7 @@ import { audit } from './audit.js';
 import { auditAccessibility } from './accessibility.js';
 import { finding } from './report.js';
 import { runInteractions, validateInteractions } from './interactions.js';
+import { createVisibility } from './visibility.js';
 
 export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'];
 export const defaultPolicy = JSON.parse(await readFile(new URL('../ui-policy.json', import.meta.url), 'utf8'));
@@ -61,14 +62,16 @@ export async function checkPage(page, input = {}) {
   const contrast = await page.evaluateHandle(`(() => { const previous = window.axe; ${axe.source}\n const engine = window.axe; window.axe = previous; return engine; })()`);
   const accessibility = await page.evaluateHandle(`(${auditAccessibility.toString()})`);
   const format = await page.evaluateHandle(`(${finding.toString()})`);
-  try { return await page.evaluate(audit, { policy, contrast, accessibility, format }); }
-  finally { await Promise.all([contrast.dispose(), accessibility.dispose(), format.dispose()]); }
+  const visibility = await page.evaluateHandle(`(${createVisibility.toString()})()`);
+  try { return await page.evaluate(audit, { policy, contrast, accessibility, format, visibility }); }
+  finally { await Promise.all([contrast.dispose(), accessibility.dispose(), format.dispose(), visibility.dispose()]); }
 }
 
 export async function checkInteractions(page, plan, input = {}, { timeout = 15000 } = {}) {
   if (!Number.isInteger(timeout) || timeout < 1) throw new Error('Page-check timeout must be a positive integer.');
   const validated = validateInteractions(plan);
-  return runInteractions(page, validated, validatePolicy(input), (page, policy) => checkPageWithin(page, policy, timeout));
+  const policy = validatePolicy(input);
+  return runInteractions(page, validated, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility);
 }
 
 async function checkPageWithin(page, policy, timeout) {

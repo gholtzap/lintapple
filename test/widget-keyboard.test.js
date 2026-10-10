@@ -286,3 +286,17 @@ test('activation plans cannot use stale checkbox states or declare the wrong sel
   await page.setContent(tabs({ manual: true }));
   await assert.rejects(checkInteractions(page, { tabs: [{ selector: '#tabs', steps: [tabStep('ArrowRight', '#t2', '#t1'), tabStep('Enter', '#t2', '#t1')] }] }), /focused tab/);
 }));
+
+test('tab panels can show child content without a wrapper box', async () => withPage(async page => {
+  for (const style of ['display:contents', 'height:0']) {
+    const fixture = tabs().replace('<body>', '<body><style>[hidden]{display:none!important}#after{display:block;margin-top:40px}</style>')
+      .replaceAll('role="tabpanel"', `role="tabpanel" style="${style}"`)
+      .replace(/>Panel (\d)<\/section>/g, '><span>Panel $1</span></section>');
+    await page.setContent(fixture);
+    passed(await checkInteractions(page, { tabs: [{ selector: '#tabs', steps: [tabStep('ArrowRight', '#t2')] }] }));
+    await page.setContent(fixture);
+    await page.locator('#p3').evaluate(el => el.hidden = false);
+    const result = await checkInteractions(page, { timeout: 100, tabs: [{ selector: '#tabs', steps: [tabStep('ArrowRight', '#t2')] }] });
+    assert.ok(result.findings.some(f => f.rule === 'control-state'));
+  }
+}));

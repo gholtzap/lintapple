@@ -37,7 +37,7 @@ export function validateInteractions(plan) {
   return result;
 }
 
-export async function runInteractions(page, input, policy, checkPage) {
+export async function runInteractions(page, input, policy, checkPage, createVisibility) {
   const plan = validateInteractions(input);
   const findings = [], suppressed = [], checks = [], states = [];
   const selectors = plan.focus.map(x => x.selector).concat(plan.buttons.flatMap(x => [x.selector, x.outcome]), plan.tooltips.flatMap(x => [x.trigger, x.tooltip]), plan.dialogs.flatMap(x => [x.open, x.dialog, x.close, x.returnFocus].filter(Boolean)));
@@ -61,14 +61,14 @@ export async function runInteractions(page, input, policy, checkPage) {
     try { await page.waitForFunction(fn, argument, { timeout: plan.timeout }); return true; }
     catch (error) { if (error.name !== 'TimeoutError') throw error; return false; }
   };
-  const shown = selector => wait(selector => {
-    const el = document.querySelector(selector);
-    return !!el && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
-  }, selector);
-  const hidden = selector => wait(selector => {
-    const el = document.querySelector(selector);
-    return !el || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) || !el.getBoundingClientRect().width || !el.getBoundingClientRect().height;
-  }, selector);
+  const contentState = async (selector, expected) => {
+    // Earlier actions can navigate to a new document.
+    const visibility = await page.evaluateHandle(`(${createVisibility.toString()})()`);
+    try { return await wait(({ selector, expected, visibility }) => visibility.hasVisibleContent(document.querySelector(selector)) === expected, { selector, expected, visibility }); }
+    finally { await visibility.dispose(); }
+  };
+  const shown = selector => contentState(selector, true);
+  const hidden = selector => contentState(selector, false);
   const focused = locator => locator.evaluate(el => el === document.activeElement);
   const inspect = async name => {
     let result;
@@ -208,7 +208,7 @@ export async function runInteractions(page, input, policy, checkPage) {
       await inspect(`dialogs[${index}]: close with ${closeMethod}`);
     }
   }
-  await runWidgets(page, plan, { target, record, wait, reach, shown, hidden, inspect });
+  await runWidgets(page, plan, { target, record, wait, reach, shown, hidden, inspect, createVisibility });
   for (const item of plan.states) {
     try {
       await page.evaluate(({ selector, ready }) => { document.querySelector(selector); document.querySelector(ready.selector); }, item);
