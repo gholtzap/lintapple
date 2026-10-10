@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { checkPage, checkInteractions, validatePolicy } from '../src/index.js';
+const { checkPage, checkInteractions, validatePolicy } = await import(process.env.LINTAPPLE_PACKAGE || '../src/index.js');
 import { validateInteractions } from '../src/interactions.js';
 import { createDemoServer } from '../demo/server.js';
 
@@ -151,7 +151,7 @@ test('CLI runs explicit interaction plans and leaves actions untouched without a
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${server.address().port}`;
   const cli = args => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['bin/lintapple.js', url, '--json', ...args]);
+    const child = spawn(process.execPath, [process.env.LINTAPPLE_CLI || 'bin/lintapple.js', url, '--json', ...args]);
     let stdout = '', stderr = '';
     child.stdout.on('data', data => stdout += data);
     child.stderr.on('data', data => stderr += data);
@@ -196,11 +196,20 @@ test('demo tooltips work on hover, keyboard focus, and Escape in both themes', a
         assert.deepEqual(specimen.findings, [], JSON.stringify(specimen.findings));
         assert.deepEqual((await checkPage(page)).findings, []);
         await page.goto(`${origin}/demo/`);
-        await page.getByText('Loading check results', { exact: true }).first().waitFor({ state: 'hidden' });
+        await page.locator('body[data-ready="true"]').waitFor();
         if (theme === 'light') await page.locator('#theme-toggle').click();
-        const index = await checkInteractions(page, { maxTabStops: 500, tooltips: [{ trigger: '#theme-toggle', tooltip: '#theme-tooltip' }, { trigger: '[data-copy]', tooltip: '#copy-tooltip' }] });
+        const index = await checkInteractions(page, { maxTabStops: 500, tooltips: [{ trigger: '#theme-toggle', tooltip: '#theme-tooltip' }] });
         assert.deepEqual(index.findings, [], JSON.stringify(index.findings));
         await page.locator('main').getByRole('link', { name: 'Larger controls', exact: true }).click();
+        await page.getByRole('heading', { name: 'Larger controls', exact: true, level: 1 }).waitFor();
+        for (const name of ['Before', 'After']) {
+          const control = page.getByRole('button', { name, exact: true });
+          await control.click();
+          await control.hover();
+          assert.deepEqual((await checkPage(page)).findings, [], `${name} hover, ${theme}, ${width}px`);
+          await control.focus();
+          assert.deepEqual((await checkPage(page)).findings, [], `${name} focus, ${theme}, ${width}px`);
+        }
         await page.getByRole('link', { name: '← Index', exact: true }).click();
         const ids = await page.locator('[id]').evaluateAll(elements => elements.map(el => el.id));
         assert.equal(new Set(ids).size, ids.length, 'Tooltip portals must not leave duplicate IDs after navigation.');

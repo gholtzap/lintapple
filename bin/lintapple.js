@@ -27,8 +27,9 @@ try {
   const report = await checkUrl(url, policy, { ready, interactions });
   if (json) console.log(JSON.stringify(report, null, 2));
   else {
-    console.log(`${report.findings.length ? 'Failed' : 'Passed'}: ${report.findings.length} UI findings across ${report.runs.length} page checks.`);
-    for (const f of report.findings) console.log(`\n${f.rule} (${f.viewport.width}px, ${f.colorScheme})\n${f.selector}\n${f.message}\nFix: ${f.fix}`);
+    const count = report.runs.reduce((sum, run) => sum + run.states.length, 0);
+    console.log(`${report.findings.length ? 'Failed' : 'Passed'}: ${report.findings.length} UI findings across ${count} page checks.`);
+    for (const f of report.findings) console.log(`\n${f.rule} (${f.viewport.width}px, ${f.colorScheme}, ${f.state || 'interaction'})\n${f.selector}\n${f.message}\nFix: ${f.fix}`);
     const suppressed = report.runs.reduce((sum, run) => sum + run.suppressed.length, 0);
     if (suppressed) console.log(`\n${suppressed} findings excluded by policy. See the JSON report for reasons.`);
   }

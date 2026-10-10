@@ -1,12 +1,12 @@
 import { readFile } from 'node:fs/promises';
-import { chromium } from 'playwright';
+import { launchBrowser } from './browser.js';
 import axe from 'axe-core';
 import { audit } from './audit.js';
 import { auditAccessibility } from './accessibility.js';
 import { finding } from './report.js';
 import { runInteractions, validateInteractions } from './interactions.js';
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'];
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'];
 export const defaultPolicy = JSON.parse(await readFile(new URL('../ui-policy.json', import.meta.url), 'utf8'));
 
 export function validatePolicy(input = {}) {
@@ -65,8 +65,19 @@ export async function checkPage(page, input = {}) {
   finally { await Promise.all([contrast.dispose(), accessibility.dispose(), format.dispose()]); }
 }
 
-export async function checkInteractions(page, plan, input = {}) {
-  return runInteractions(page, plan, validatePolicy(input));
+export async function checkInteractions(page, plan, input = {}, { timeout = 15000 } = {}) {
+  if (!Number.isInteger(timeout) || timeout < 1) throw new Error('Page-check timeout must be a positive integer.');
+  const validated = validateInteractions(plan);
+  return runInteractions(page, validated, validatePolicy(input), (page, policy) => checkPageWithin(page, policy, timeout));
+}
+
+async function checkPageWithin(page, policy, timeout) {
+  let timer;
+  try {
+    return await Promise.race([checkPage(page, policy), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Page checks exceeded the time limit.')), timeout);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 
 export async function checkUrl(url, input = {}, { ready, timeout = 15000, interactions } = {}) {
@@ -74,7 +85,7 @@ export async function checkUrl(url, input = {}, { ready, timeout = 15000, intera
   if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) throw new Error('Use an HTTP, HTTPS, or file URL.');
   const policy = validatePolicy(input);
   if (interactions) validateInteractions(interactions);
-  const browser = await chromium.launch();
+  const browser = await launchBrowser();
   const report = { url, rules: ruleIds, runs: [], findings: [] };
   try {
     for (const viewport of policy.viewports) for (const colorScheme of policy.colorSchemes) {
@@ -85,22 +96,21 @@ export async function checkUrl(url, input = {}, { ready, timeout = 15000, intera
         const response = await page.goto(url, { waitUntil: 'load', timeout });
         if (response && !response.ok()) throw new Error(`Page returned HTTP ${response.status()}.`);
         if (ready) await page.locator(ready).waitFor({ state: 'visible' });
-        let timer;
-        let result;
-        try {
-          result = await Promise.race([checkPage(page, policy), new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('Page checks exceeded the time limit.')), timeout);
-          })]);
-        } finally { clearTimeout(timer); }
+        const result = await checkPageWithin(page, policy, timeout);
+        const states = [{ name: 'initial', url: page.url(), ...result }];
+        const findings = result.findings.map(f => ({ ...f, state: 'initial' }));
+        const suppressed = result.suppressed.map(f => ({ ...f, state: 'initial' }));
+        const accessibilityCoverage = { ...result.accessibilityCoverage };
         if (interactions) {
-          const interaction = await checkInteractions(page, interactions, policy);
-          result.findings.push(...interaction.findings);
-          result.suppressed.push(...interaction.suppressed);
-          result.accessibilityCoverage.interactions = interaction.checks;
-          result.accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : 'not tested: empty interaction plan';
+          const interaction = await checkInteractions(page, interactions, policy, { timeout });
+          findings.push(...interaction.findings);
+          suppressed.push(...interaction.suppressed);
+          states.push(...interaction.states);
+          accessibilityCoverage.interactions = interaction.checks;
+          accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : interaction.states.length ? 'not tested: page-state actions only' : 'not tested: empty interaction plan';
         }
-        report.runs.push({ viewport, colorScheme, elements: result.elements, controls: result.controls, insetControls: result.insetControls, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed: result.suppressed, accessibilityCoverage: result.accessibilityCoverage });
-        report.findings.push(...result.findings.map(f => ({ ...f, viewport, colorScheme })));
+        report.runs.push({ viewport, colorScheme, elements: result.elements, controls: result.controls, insetControls: result.insetControls, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
+        report.findings.push(...findings.map(f => ({ ...f, viewport, colorScheme })));
       } finally { await context.close(); }
     }
     return report;

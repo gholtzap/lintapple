@@ -18,7 +18,6 @@ if (!rule || !['before', 'after'].includes(state) || !['light', 'dark'].includes
   let selectedState = state;
   let transition;
   const applyState = () => {
-    if (rule.afterHTML) specimen.innerHTML = selectedState === 'after' ? rule.afterHTML : rule.html;
     for (const [selector, attributes] of Object.entries(rule.attributes?.[selectedState] || {})) {
       const element = specimen.querySelector(selector);
       for (const [name, value] of Object.entries(attributes)) {
@@ -34,23 +33,6 @@ if (!rule || !['before', 'after'].includes(state) || !['light', 'dark'].includes
     history.replaceState(null, '', `?${params}`);
   };
   applyState();
-  specimen.addEventListener('click', event => {
-    if (event.target.closest('#keyboard-button')) specimen.querySelector('#keyboard-result').textContent = 'Applied';
-    if (event.target.closest('#disclosure')) {
-      const panel = specimen.querySelector('#details-panel');
-      panel.hidden = !panel.hidden;
-      if (selectedState === 'after') specimen.querySelector('#disclosure').setAttribute('aria-expanded', String(!panel.hidden));
-    }
-    const dialog = specimen.querySelector('#edit-dialog');
-    if (event.target.closest('#edit-open')) {
-      if (selectedState === 'after') dialog.showModal();
-      else dialog.hidden = false;
-    }
-    if (event.target.closest('#edit-cancel')) {
-      if (selectedState === 'after') dialog.close();
-      else { dialog.hidden = true; event.target.blur(); }
-    }
-  });
   window.setExampleState = nextState => {
     if (!['before', 'after'].includes(nextState) || nextState === selectedState) return;
     selectedState = nextState;
@@ -60,7 +42,7 @@ if (!rule || !['before', 'after'].includes(state) || !['light', 'dark'].includes
       transition.ready.catch(() => {});
     } else applyState();
   };
-  if (rule.id === 'content-clipping') {
+  if (rule.id === 'content-overflow') {
     specimen.setAttribute('data-ui-stack', '');
     const panel = specimen.querySelector('.resize-panel');
     const input = specimen.querySelector('#example-width');

@@ -1,13 +1,18 @@
-import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 
 const root = resolve(new URL('../', import.meta.url).pathname);
 const stage = resolve(process.argv[2] || join(root, 'test-results/production-stage'));
+if (stage === root) throw new Error('Use a separate directory for the release.');
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 await mkdir(join(stage, 'downloads'), { recursive: true });
+await rm(join(stage, 'demo'), { recursive: true, force: true });
 await cp(join(root, 'demo'), join(stage, 'demo'), { recursive: true });
+await mkdir(join(stage, 'demo/vendor'), { recursive: true });
+for (const name of ['lenis.mjs', 'lenis.css']) await cp(join(root, 'node_modules/lenis/dist', name), join(stage, 'demo/vendor', name));
+await cp(join(root, 'node_modules/lenis/LICENSE'), join(stage, 'demo/vendor/lenis.LICENSE'));
 await mkdir(join(stage, 'examples'), { recursive: true });
 await cp(join(root, 'examples/ui.css'), join(stage, 'examples/ui.css'));
 await cp(join(root, 'README.md'), join(stage, 'README.md'));

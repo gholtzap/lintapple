@@ -1,2 +1,2 @@
-.ui-tooltip { position: fixed; z-index: 100; max-width: calc(100vw - 16px); padding: 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--ui-surface); color: var(--ui-text); font: 12px/1.5 system-ui; }
+.ui-tooltip { position: fixed; z-index: 100; width: max-content; max-width: calc(100vw - 16px); padding: 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--ui-surface); color: var(--ui-text); font: 12px/1.5 system-ui; }
 .ui-tooltip[hidden] { display: none; }

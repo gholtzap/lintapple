@@ -214,6 +214,21 @@ export async function audit({ policy, contrast, accessibility, format }) {
     }
     if (escaped.size)
       add('viewport-bounds', el, [...escaped].map(([edge, amount]) => `${edge} overflow ${Number(amount.toFixed(2))}px`).join(', '), 'content inside the horizontal viewport; fixed elements and open overlays also fit vertically', 'Use responsive widths and wrapping. Constrain the overlay size and use a local scroll region for long content.');
+    const container = el.closest('[data-ui-content]');
+    if (container && rects.length) {
+      const contract = { element: container, bounds: clientBounds(container) };
+      const overflow = new Map();
+      const checkX = !scrolls(container, 'X') && !scrollsWithin(el, contract, 'X');
+      const checkY = !scrolls(container, 'Y') && !scrollsWithin(el, contract, 'Y');
+      for (const rect of rects) {
+        const painted = clippedRect(rect, context.clips, el, true);
+        if (painted.left >= painted.right || painted.top >= painted.bottom) continue;
+        for (const [edge, distance] of outside(contract.bounds, painted, checkX, checkY))
+          overflow.set(edge, Math.max(overflow.get(edge) ?? 0, -distance));
+      }
+      if (overflow.size)
+        add('content-overflow', el, [...overflow].map(([edge, amount]) => `${edge} text overflow ${Number(amount.toFixed(2))}px`).join(', '), 'text inside the nearest data-ui-content container', 'Let text wrap or provide a local scroll region inside the marked container.', container);
+    }
     for (const clip of context.clips) {
       const cut = new Map();
       for (const rect of rects) for (const [edge, distance] of outside(clip.bounds, rect, clip.x && !scrollsWithin(el, clip, 'X'), clip.y && !scrollsWithin(el, clip, 'Y')))

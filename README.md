@@ -42,7 +42,7 @@ npm test
 
 ## Rule demo
 
-The demo uses the layout of [Craft](https://craft.gustavofior.com/) to show ten rules from this repo. Each rule has a before page, an after page, the fix, and saved results from the real checker.
+The demo uses the layout of [Craft](https://craft.gustavofior.com/) to show interface rules from this repo. Each rule page has a before example, an after example, and the fix code.
 
 ```sh
 npm run demo
@@ -51,7 +51,9 @@ npm run demo
 
 Select Before or After on a card, or select the rule title to compare both states. The demo starts in dark mode. The theme button changes the page and examples between light and dark themes.
 
-In Complete labels, drag the example's lower-right corner or use the width slider. The before text is clipped at small widths. The after text wraps. The displayed lint count applies to the initial width.
+The demo uses [Lenis](https://lenis.dev/) for smooth wheel scrolling. It respects the reduced-motion setting and keeps native touch and sidebar scrolling. Rule changes return to the top immediately. The local server and release build use the pinned Lenis files from `node_modules`.
+
+In Contained text, drag the canvas's lower-right corner or use the width slider. Before text extends past the card edge. After text wraps inside the card.
 
 ```sh
 npm run demo:check
@@ -59,7 +61,7 @@ npm run demo:check
 
 This command checks each example as a main document at 248, 330, 390, and 1440 px in both themes. Before pages must fail their named rule. After pages must have no findings. It saves the actual results in `demo/reports.json`. It also checks the index, each rule detail, theme controls, and open mobile navigation at 390, 768, and 1440 px. The policy and exceptions stay unchanged.
 
-The gallery uses iframes to keep each example's CSS separate. The checker does not inspect iframe content from the parent page. The direct example checks are required. The displayed findings are saved results, not live checks on the visitor's device.
+The gallery uses iframes to keep each example's CSS separate. The checker does not inspect iframe content from the parent page. The direct example checks are required. Saved check results are in `demo/reports.json`; the site does not load or show them.
 
 ## Policy
 
@@ -104,7 +106,14 @@ For light and dark checks, set `colorSchemes` to `["light", "dark"]`. This tests
 | `horizontal-overflow` | The document has no horizontal overflow beyond a 1 px tolerance. |
 | `viewport-bounds` | Rendered elements and text stay inside the screen horizontally. Fixed elements and open dialogs or overlays also fit vertically. |
 | `content-clipping` | Text line boxes fit inside ancestors that use `overflow: hidden` or `clip`. |
+| `content-overflow` | Visible text stays inside its nearest `data-ui-content` container, with a 1 px tolerance. Local scrolling inside that container is allowed. |
 | `text-contrast` | Normal text has at least 4.5:1 contrast. Large text has at least 3:1. Unresolved calculations also produce a finding. |
+| `accessible-name` | Controls have an accessible name. |
+| `form-label` | Form fields have a programmatic label. A placeholder alone is insufficient. |
+| `aria-reference` | ARIA references identify existing elements. A collapsed popup can create its controlled element when opened. |
+| `label-consistency` | The accessible name includes the visible control label. |
+
+These rules run through `checkPage`, `checkUrl`, and the `lintapple` command. Alignment needs the markers described below. Text containment needs `data-ui-content`. Clipping and the four listed accessibility rules need no checker-specific attributes. Removing a rule from the demo does not disable it in the checker.
 
 ### Small layout primitives
 
@@ -176,6 +185,8 @@ The rule measures all four edges of the container's client box, excluding border
 `viewport-bounds` runs without markers. It checks rendered element boxes and text line boxes against the CSS layout viewport, with a 1 px tolerance. Normal page content can extend below the screen and remain available through vertical scrolling. Fixed elements, open `dialog` elements, and elements with `role="dialog"`, `role="alertdialog"`, or `data-ui-overlay` must fit vertically too. Their descendants must fit unless a local scroll region provides access to that content.
 
 Local regions with `overflow: auto` or `scroll` can contain wider or taller content. The scroll region itself must fit the screen. Page-level scrolling does not exempt horizontal overflow. Content clipped by an inner container is checked against its painted bounds for viewport errors. Root overflow hiding does not hide a screen-bound error.
+
+Mark an HTML text container with `data-ui-content` to check visible text against its inner edges. `content-overflow` checks the nearest marked container, including text that stays on screen but extends past a card edge. Borders do not count as space for text. Wrapping and local scrolling inside the marked container are allowed. Scrolling outside that container does not permit text to escape it.
 
 `content-clipping` measures direct DOM text nodes with browser Range rectangles and compares each text line to the client box of clipping ancestors. It includes inline wrappers, long words, ellipsis, and line clamping. Borders do not enlarge the clipping area. Normal scrollable content is allowed. An intentionally truncated label needs a scoped exception and a reason:
 
@@ -273,7 +284,9 @@ The normal CLI does not activate buttons, open dialogs, or change keyboard focus
 node bin/lintapple.js http://localhost:3000 --interactions interactions.json --json
 ```
 
-Or call `checkInteractions(page, plan, policy)` from Playwright. It returns `findings`, `suppressed`, and `checks` with the rule, selector, phase, and status. Plans use CSS selectors in the main document. Each action selector must identify one element when used. A tooltip element must exist before its check. A dialog can be created by its open action. Plans run focus checks, tooltips, buttons, then dialogs in the listed order and change the page state. Use fresh fixtures or reset the page between separate plans.
+Or call `checkInteractions(page, plan, policy)` from Playwright. It returns `findings`, `suppressed`, `checks`, and `states`. Plans use CSS selectors in the main document. Each action selector must identify one element when used. A tooltip element must exist before its check. A dialog can be created by its open action. Plans run focus checks, tooltips, buttons, dialogs, then named states in the listed order and change the page state. Use fresh fixtures or reset the page between separate plans.
+
+Existing plans now run `checkPage()` after keyboard focus, tooltip hover and focus, tooltip dismissal, button activation, and dialog open and close. State names identify the plan item and phase, such as `buttons[0]: Enter` or `dialogs[0]: open for button`. Internal Tab navigation remains part of the keyboard behavior check.
 
 Button checks require `Enter` or `Space` and a declared result element with exact trimmed text. That text must not already be present before activation, so a stale success message cannot produce a pass. Test both keys in separate reset states for custom buttons. The plan activates each listed button once. Each dialog plan opens the dialog twice: once to test its close button and once to test Escape. It checks initial focus, forward and backward focus containment, and focus return. `returnFocus` can name a different logical workflow target. Moving to browser controls is not treated as focus escaping into background page content. See [modal dialog guidance](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/).
 
@@ -282,6 +295,29 @@ Focus checks use real Tab navigation. The computed-style check detects common ou
 `accessibilityCoverage` records the page rules and the explicit interaction checks. Without a plan, interaction behavior is marked untested. A passing page check does not prove keyboard or dialog behavior or full accessibility. Check each route and relevant state.
 
 ## App states and CI
+
+The CLI checks the initial page and each planned state at every configured viewport and color preference. Add `states` to an existing interaction plan to check a workflow after each declared action:
+
+```json
+{
+  "states": [
+    { "name": "Menu open", "action": "click", "selector": "#options", "ready": { "selector": "#menu" } },
+    { "name": "Menu closed", "action": "press", "selector": "#options", "key": "Escape", "ready": { "selector": "#menu", "state": "hidden" } },
+    { "name": "Dialog open", "action": "click", "selector": "#edit", "ready": { "selector": "#editor" } },
+    { "name": "Form error", "action": "click", "selector": "#save", "ready": { "selector": "#error", "expectedText": "Enter a project name." } },
+    { "name": "Form filled", "action": "fill", "selector": "#project-name", "value": "Research", "ready": { "selector": "#error", "state": "hidden" } },
+    { "name": "Saved result", "action": "click", "selector": "#save", "ready": { "selector": "#saved", "expectedText": "Saved Research" } }
+  ]
+}
+```
+
+Actions support `click`, `hover`, `fill` with a string `value`, and `press` with a Playwright `key`. Each step needs a unique name, an action selector, and a ready selector. Names can contain at most 100 characters. `initial` and generated interaction names are reserved. Plans can contain at most 100 named steps. Ready selectors wait for `visible` by default, or `hidden` when specified. An optional `expectedText` must exactly match the visible element's trimmed text. A hidden ready element can be removed from the page. Other ready selectors must match one element.
+
+The checker waits for readiness, then runs all page rules with the same policy and exceptions. Each action must have its own step so that later actions cannot hide an earlier error. A missing or ambiguous target, readiness timeout, or page-check timeout stops the run with exit 2. Findings in any checked state produce exit 1. A completed run with no findings produces exit 0. The plan's `timeout` controls actions and readiness; page checks use the CLI's 15-second limit. The API can set that limit with `checkInteractions(page, plan, policy, { timeout: 15000 })`.
+
+`checkInteractions()` returns each page report in `states`, with its name, URL, findings, suppressed findings, counts, and coverage. Combined page findings and suppressed page findings include `state`. Behavior findings keep their selector, phase, and status. `checkUrl()` adds `runs[].states`, starting with `initial`, and keeps findings from all states, including errors that a later action removes. Each viewport and color preference starts in a fresh browser context. The text report includes state names and the total number of page checks.
+
+These checks test the UI in the listed states. They do not prove that all workflows were listed or that a saved message means the correct data was stored. Use product assertions for those results.
 
 ### Playwright tests
 
@@ -329,26 +365,10 @@ Run `npx playwright test`, then `npx playwright show-report` to open the HTML re
 
 This repository includes a working example in `examples/playwright/`. Run `npm run test:playwright`, then `npx playwright show-report test-results/playwright-report`. The workflow in `.github/workflows/playwright.yml` runs that example, emits GitHub annotations for failures, and saves the HTML report.
 
-### Direct page checks
-
-The CLI checks the initial page at each configured viewport and color preference. For signed-in pages, dialogs, forms, or other states, enter the state in your Playwright test and call the same checker:
-
-```js
-import { checkPage } from 'lintapple';
-import policy from './ui-policy.json' with { type: 'json' };
-
-// Your test signs in and opens the dialog first.
-await page.getByRole('button', { name: 'Add project' }).click();
-await page.getByRole('dialog').waitFor();
-const result = await checkPage(page, policy);
-expect(result.findings).toEqual([]);
-```
-
-For use inside this project, import from `./src/index.js`. The production site also provides a versioned package download:
+For direct page checks inside this project, import `checkPage` from `./src/index.js`. The production site also provides a versioned package download:
 
 ```sh
-npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.8.tgz
-npx playwright install chromium
+npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.11.tgz
 ```
 
 The [production examples](https://lintapple-demo.vercel.app/demo/) cover the design and accessibility rules. `release.json` records the source commit and file checksums. `npm run release:build` makes the static deployment and package in `test-results/production-stage`. The CLI can also run without package installation through `node bin/lintapple.js`.

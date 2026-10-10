@@ -2,9 +2,9 @@ import { finding } from './report.js';
 
 export function validateInteractions(plan) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Interaction plan must be an object.');
-  const fields = ['focus', 'buttons', 'tooltips', 'dialogs', 'timeout', 'maxTabStops'];
+  const fields = ['focus', 'buttons', 'tooltips', 'dialogs', 'states', 'timeout', 'maxTabStops'];
   for (const key of Object.keys(plan)) if (!fields.includes(key)) throw new Error(`Unknown interaction field: ${key}`);
-  const result = { focus: [], buttons: [], tooltips: [], dialogs: [], timeout: 1500, maxTabStops: 100, ...plan };
+  const result = { focus: [], buttons: [], tooltips: [], dialogs: [], states: [], timeout: 1500, maxTabStops: 100, ...plan };
   for (const [key, max] of [['timeout', 10000], ['maxTabStops', 500]]) if (!Number.isInteger(result[key]) || result[key] < 1 || result[key] > max) throw new Error(`${key} must be an integer from 1 to ${max}.`);
   for (const kind of ['focus', 'buttons', 'tooltips', 'dialogs']) {
     if (!Array.isArray(result[kind]) || result[kind].length > 100) throw new Error(`${kind} must be a list of at most 100 interaction checks.`);
@@ -16,12 +16,28 @@ export function validateInteractions(plan) {
       if (item.returnFocus !== undefined && (typeof item.returnFocus !== 'string' || !item.returnFocus.trim())) throw new Error('returnFocus must be a selector.');
     }
   }
+  if (!Array.isArray(result.states) || result.states.length > 100) throw new Error('states must be a list of at most 100 named page checks.');
+  const names = new Set(['initial']);
+  for (const item of result.states) {
+    if (!item || typeof item !== 'object' || Array.isArray(item) || !['click', 'fill', 'press', 'hover'].includes(item.action)) throw new Error('Each named state needs a supported action.');
+    const keys = ['name', 'action', 'selector', 'ready', ...(item.action === 'fill' ? ['value'] : item.action === 'press' ? ['key'] : [])];
+    if (Object.keys(item).some(key => !keys.includes(key))) throw new Error('Unknown named state field.');
+    for (const key of ['name', 'selector']) if (typeof item[key] !== 'string' || !item[key].trim()) throw new Error(`Named state needs ${key}.`);
+    if (item.name.length > 100 || names.has(item.name) || /^(focus|buttons|tooltips|dialogs|tabs|menus)\[\d+\]:/.test(item.name)) throw new Error('State names must be unique, at most 100 characters, and cannot use initial or a generated interaction name.');
+    names.add(item.name);
+    if (item.action === 'fill' && typeof item.value !== 'string') throw new Error('Fill action needs a string value.');
+    if (item.action === 'press' && (typeof item.key !== 'string' || !item.key.trim())) throw new Error('Press action needs a key.');
+    const ready = item.ready;
+    if (!ready || typeof ready !== 'object' || Array.isArray(ready) || Object.keys(ready).some(key => !['selector', 'state', 'expectedText'].includes(key)) || typeof ready.selector !== 'string' || !ready.selector.trim()) throw new Error('Named state needs a ready selector.');
+    if (ready.state !== undefined && !['visible', 'hidden'].includes(ready.state)) throw new Error('Ready state must be visible or hidden.');
+    if (ready.expectedText !== undefined && (typeof ready.expectedText !== 'string' || ready.state === 'hidden')) throw new Error('expectedText needs a visible ready element and a string.');
+  }
   return result;
 }
 
-export async function runInteractions(page, input, policy) {
+export async function runInteractions(page, input, policy, checkPage) {
   const plan = validateInteractions(input);
-  const findings = [], suppressed = [], checks = [];
+  const findings = [], suppressed = [], checks = [], states = [];
   const selectors = plan.focus.map(x => x.selector).concat(plan.buttons.flatMap(x => [x.selector, x.outcome]), plan.tooltips.flatMap(x => [x.trigger, x.tooltip]), plan.dialogs.flatMap(x => [x.open, x.dialog, x.close, x.returnFocus].filter(Boolean)));
   await page.evaluate(selectors => selectors.forEach(selector => document.querySelector(selector)), selectors);
   const target = async selector => {
@@ -52,6 +68,14 @@ export async function runInteractions(page, input, policy) {
     return !el || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) || !el.getBoundingClientRect().width || !el.getBoundingClientRect().height;
   }, selector);
   const focused = locator => locator.evaluate(el => el === document.activeElement);
+  const inspect = async name => {
+    let result;
+    try { result = await checkPage(page, policy); }
+    catch (error) { throw new Error(`State "${name}" could not be checked: ${error.message}`, { cause: error }); }
+    states.push({ name, url: page.url(), ...result });
+    findings.push(...result.findings.map(item => ({ ...item, state: name })));
+    suppressed.push(...result.suppressed.map(item => ({ ...item, state: name })));
+  };
   const reach = async locator => {
     for (let step = 0; step < plan.maxTabStops; step++) {
       await page.keyboard.press('Tab');
@@ -63,13 +87,13 @@ export async function runInteractions(page, input, policy) {
     const properties = ['outlineStyle', 'outlineWidth', 'outlineColor', 'boxShadow', 'borderColor', 'borderWidth', 'backgroundColor', 'color', 'textDecorationLine'];
     return [null, '::before', '::after'].map(pseudo => Object.fromEntries(properties.map(key => [key, getComputedStyle(el, pseudo)[key]])));
   });
-  for (const item of plan.focus) {
+  for (const [index, item] of plan.focus.entries()) {
     const locator = await target(item.selector);
     await locator.evaluate(el => el.blur());
     const before = await signature(locator);
     const reachable = await reach(locator);
     await record('keyboard-operation', item.selector, reachable, 'not reached by Tab within the configured limit', 'the planned control to receive keyboard focus', 'Review the tab order, configured limit, and keyboard navigation.', { phase: 'tab-reachability', ...(reachable ? {} : { status: 'unresolved' }) });
-    if (!reachable) continue;
+    if (!reachable) { await inspect(`focus[${index}]: unreachable`); continue; }
     const after = await signature(locator);
     const indicator = after.some((style, index) => {
       const prior = before[index];
@@ -92,8 +116,9 @@ export async function runInteractions(page, input, policy) {
       return { status: 'unresolved', actual: 'all sampled focus points are covered; review the painted result' };
     });
     await record('focus-obscured', item.selector, exposure.status === 'passed', exposure.actual, 'the focused control to remain visible', 'Keep focused controls in view and clear of sticky bars and overlays.', { status: exposure.status, phase: 'keyboard-focus' });
+    await inspect(`focus[${index}]: keyboard focus`);
   }
-  for (const item of plan.tooltips) {
+  for (const [index, item] of plan.tooltips.entries()) {
     const trigger = await target(item.trigger);
     await target(item.tooltip);
     const linked = await trigger.evaluate((el, selector) => {
@@ -110,20 +135,23 @@ export async function runInteractions(page, input, policy) {
     }
     await trigger.hover({ timeout: plan.timeout });
     await record('icon-button-tooltip', item.trigger, await shown(item.tooltip), 'tooltip did not appear on hover', 'a text tooltip on hover', 'Show the tooltip on pointer hover.', { phase: 'hover' });
+    await inspect(`tooltips[${index}]: hover`);
     await page.mouse.move(0, 0);
     const reset = await hidden(item.tooltip);
     const reachable = await reach(trigger);
     await record('keyboard-operation', item.trigger, reachable, 'tooltip trigger was not reached within the configured Tab limit', 'a keyboard-reachable tooltip trigger', 'Review the tab order, configured limit, and keyboard navigation.', { phase: 'tooltip-tab', ...(reachable ? {} : { status: 'unresolved' }) });
     const focusShown = reset && reachable && await shown(item.tooltip);
     await record('icon-button-tooltip', item.trigger, focusShown, reset ? 'tooltip did not appear on keyboard focus' : 'hover tooltip did not reset before the focus check', 'a text tooltip on keyboard focus', 'Show the tooltip for keyboard focus and clear its hover state.', { phase: 'focus', ...(!reset || !reachable ? { status: 'unresolved' } : {}) });
+    await inspect(`tooltips[${index}]: keyboard focus`);
     if (focusShown) {
       await page.keyboard.press('Escape');
       await record('icon-button-tooltip', item.trigger, await hidden(item.tooltip), 'tooltip remained visible after Escape', 'Escape to dismiss the tooltip', 'Close the tooltip on Escape without moving focus.', { phase: 'escape' });
       await record('keyboard-operation', item.trigger, await focused(trigger), 'Escape moved focus away from the tooltip trigger', 'focus to stay on the tooltip trigger', 'Dismiss the tooltip without moving focus.', { phase: 'tooltip-escape-focus' });
+      await inspect(`tooltips[${index}]: Escape`);
     }
     await trigger.evaluate(el => el.blur());
   }
-  for (const item of plan.buttons) {
+  for (const [index, item] of plan.buttons.entries()) {
     const button = await target(item.selector);
     const reached = await reach(button);
     await record('keyboard-operation', item.selector, reached, 'button was not reached within the configured Tab limit', 'a keyboard-reachable button', 'Review the tab order, configured limit, and keyboard navigation.', { phase: item.key, ...(reached ? {} : { status: 'unresolved' }) });
@@ -138,8 +166,9 @@ export async function runInteractions(page, input, policy) {
     await page.keyboard.press(item.key);
     const activated = await wait(matches, witness);
     await record('keyboard-operation', item.selector, activated, `${item.key} did not produce the declared result`, `${item.key} to produce text "${item.expectedText}" at ${item.outcome}`, 'Handle the keyboard action or use a native button.', { phase: item.key, outcomeSelector: item.outcome });
+    await inspect(`buttons[${index}]: ${item.key}`);
   }
-  for (const item of plan.dialogs) {
+  for (const [index, item] of plan.dialogs.entries()) {
     const opener = await target(item.open);
     const returnSelector = item.returnFocus || item.open;
     for (const closeMethod of ['button', 'Escape']) {
@@ -150,6 +179,7 @@ export async function runInteractions(page, input, policy) {
       }
       const inside = selector => document.querySelector(selector)?.contains(document.activeElement);
       await record('dialog-focus', item.dialog, await wait(inside, item.dialog), 'focus stayed outside the open dialog', 'focus to enter the dialog', 'Move focus into the dialog when it opens.', { phase: 'entry' });
+      await inspect(`dialogs[${index}]: open for ${closeMethod}`);
       for (const key of ['Tab', 'Shift+Tab']) {
         const seen = new Set();
         let status = 'unresolved';
@@ -170,10 +200,31 @@ export async function runInteractions(page, input, policy) {
       else await (await target(item.close)).click({ timeout: plan.timeout });
       const closed = await hidden(item.dialog);
       await record('dialog-focus', item.dialog, closed, `${closeMethod} did not close the modal`, 'the close action to close the modal', 'Connect the close action and handle Escape.', { phase: `close-${closeMethod}` });
-      if (!closed) break;
+      if (!closed) { await inspect(`dialogs[${index}]: close with ${closeMethod}`); break; }
       const returned = await wait(selector => document.querySelector(selector) === document.activeElement, returnSelector);
       await record('dialog-focus', returnSelector, returned, 'focus did not return to the planned control', 'focus to return to the opener or declared workflow target', 'Restore focus when the modal closes.', { phase: `return-${closeMethod}` });
+      await inspect(`dialogs[${index}]: close with ${closeMethod}`);
     }
   }
-  return { findings, suppressed, checks };
+  for (const item of plan.states) {
+    try {
+      await page.evaluate(({ selector, ready }) => { document.querySelector(selector); document.querySelector(ready.selector); }, item);
+      const locator = await target(item.selector);
+      if (item.action === 'fill') await locator.fill(item.value, { timeout: plan.timeout });
+      else if (item.action === 'press') await locator.press(item.key, { timeout: plan.timeout });
+      else await locator[item.action]({ timeout: plan.timeout });
+      const ready = page.locator(item.ready.selector);
+      if (await ready.count() > 1) throw new Error(`Ready selector must match at most one element: ${item.ready.selector}`);
+      await ready.waitFor({ state: item.ready.state || 'visible', timeout: plan.timeout });
+      if (item.ready.expectedText !== undefined && !await wait(({ selector, text }) => {
+        const elements = document.querySelectorAll(selector);
+        if (elements.length > 1) throw new Error(`Ready selector must match one element: ${selector}`);
+        return elements[0]?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && elements[0].textContent.trim() === text;
+      }, { selector: item.ready.selector, text: item.ready.expectedText })) throw new Error('Ready text did not match.');
+      if (await ready.count() > 1) throw new Error(`Ready selector must match at most one element: ${item.ready.selector}`);
+      if (await ready.count() === 1) await target(item.ready.selector);
+    } catch (error) { throw new Error(`State "${item.name}" could not be checked: ${error.message}`, { cause: error }); }
+    await inspect(item.name);
+  }
+  return { findings, suppressed, checks, states };
 }

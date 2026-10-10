@@ -1,6 +1,6 @@
 {
   "name": "lintapple",
-  "version": "0.1.8",
+  "version": "0.1.11",
   "description": "Check rendered interfaces against explicit design rules.",
   "type": "module",
   "bin": {
@@ -35,5 +35,8 @@
   "dependencies": {
     "axe-core": "4.14.0",
     "playwright": "1.63.0"
+  },
+  "devDependencies": {
+    "lenis": "1.3.26"
   }
 }

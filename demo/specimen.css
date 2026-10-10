@@ -34,8 +34,8 @@ body { padding: 16px; }
   background: var(--ui-surface);
 }
 .ui-stack { gap: 8px; }
+.edit-project { padding-inline-start: 8px; }
 .label { font-size: 14px; }
-.specimen:has(.type-screen) { width: min(100%, 360px); }
 .type-screen h1 { font-weight: 500; }
 .project-row { padding-top: 8px; border-top: 1px solid var(--ui-border); }
 .action-heading { margin-inline: 8px; }
@@ -45,30 +45,23 @@ th, td { padding: 4px 0; font-size: 14px; }
 th { font-weight: 500; }
 .radius-panel { width: 100%; padding: 7px; border: 1px solid var(--ui-border); border-radius: 24px; background: var(--example-fill); }
 .radius-content { min-height: 116px; padding: 16px; display: flex; align-items: center; background: var(--ui-surface); }
-.control-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px; }
-.remove-button { min-width: 0; min-height: 0; padding: 0; flex-shrink: 0; display: grid; place-items: center; }
-.remove-button svg { width: 8px; height: 8px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.control-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 8px; }
+.control-row .label { min-width: 0; overflow-wrap: anywhere; }
+.remove-button { min-width: 0; min-height: 0; padding: 0; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 4px; background: transparent; }
+.remove-button svg { width: min(16px, calc(100% - 2px)); height: min(16px, calc(100% - 2px)); flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.remove-button:hover { background: var(--example-fill); }
 .ui-actions { flex-wrap: nowrap; }
 .ui-actions button { min-height: 40px; padding: 8px; font-size: 14px; }
 .primary { background: var(--ui-text); color: var(--ui-background); border-color: var(--ui-text); }
 button:hover { border-color: var(--ui-text); }
 .primary:hover { background: var(--ui-text); color: var(--ui-background); }
-.action-surface { border: 1px solid var(--ui-border); border-radius: 8px; }
-.action-surface button { width: 100%; }
+.action-panel button { width: 100%; }
 .project-name { min-width: 0; }
-.specimen:has(.resize-panel) { width: 100%; flex-direction: column; gap: 12px; }
-.resize-panel { width: min(224px, 100%); min-width: min(144px, 100%); max-width: 100%; resize: horizontal; overflow: auto; align-self: flex-start; flex-shrink: 0; }
+.specimen:has(.resize-panel) { flex-direction: column; gap: 12px; }
+.resize-panel { width: 100%; min-width: min(144px, 100%); max-width: 100%; padding-right: 24px; resize: horizontal; overflow: auto; align-self: flex-start; flex-shrink: 0; }
 .resize-help { width: 100%; font-size: 12px; line-height: 18px; }
 .resize-controls { width: 100%; font-size: 12px; }
 .resize-controls input { width: 100%; min-width: 0; height: 32px; margin: 0; accent-color: var(--ui-text); }
 ::view-transition-group(root), ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 160ms; }
-.demo-action { min-width: 32px; min-height: 32px; padding: 8px; border: 1px solid var(--ui-border); border-radius: 4px; font-size: 14px; background: var(--ui-surface); color: var(--ui-text); }
-.remove-button.demo-action { width: 32px; height: 32px; padding: 0; }
 .product input { min-width: 0; width: 100%; min-height: 32px; padding: 4px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--ui-surface); color: var(--ui-text); font: 14px system-ui; }
 .product input::placeholder { color: var(--ui-text); opacity: 1; }
-.focus-product { position: relative; }
-.focus-cover { position: absolute; inset: 0; z-index: 1; background: var(--ui-surface); }
-.example-dialog { position: fixed; inset: 16px; width: min(224px, calc(100vw - 32px)); height: fit-content; margin: auto; padding: 16px; border: 1px solid var(--ui-border); background: var(--ui-surface); color: var(--ui-text); }
-.example-dialog[hidden] { display: none; }
-.target-row { display: flex; }
-.target-row button { min-width: 0; min-height: 0; padding: 0; font-size: 14px; }
