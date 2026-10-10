@@ -112,7 +112,7 @@ test('tooltip checks hover, real keyboard focus, Escape, and a hover-only defect
   const good = await checkInteractions(page, { tooltips: [{ trigger: '#good', tooltip: '#good-tip' }] });
   assert.deepEqual(good.findings, [], JSON.stringify(good.findings));
   assert.ok(good.checks.some(x => x.phase === 'escape' && x.status === 'passed'));
-  const bad = await checkInteractions(page, { timeout: 100, tooltips: [{ trigger: '#bad', tooltip: '#bad-tip' }] });
+  const bad = await checkInteractions(page, { timeout: 1000, tooltips: [{ trigger: '#bad', tooltip: '#bad-tip' }] });
   assert.ok(bad.findings.some(x => x.rule === 'icon-button-tooltip' && x.phase === 'focus'));
 }));
 
@@ -134,7 +134,7 @@ test('dialog checks entry, both tab directions, close, Escape, and focus return'
   for (const phase of ['entry', 'Tab', 'Shift+Tab', 'close-button', 'return-button', 'close-Escape', 'return-Escape']) assert.ok(result.checks.some(x => x.phase === phase && x.status === 'passed'), phase);
   await page.setContent(shell(`<button id="open" onclick="document.querySelector('#modal').hidden=false">Edit</button>
     <div id="modal" role="dialog" aria-label="Edit food" aria-modal="true" hidden><button id="cancel" onclick="document.querySelector('#modal').hidden=true;this.blur()">Cancel</button></div>`));
-  const bad = await checkInteractions(page, { timeout: 100, maxTabStops: 10, dialogs: [{ open: '#open', dialog: '#modal', close: '#cancel' }] });
+  const bad = await checkInteractions(page, { timeout: 1000, maxTabStops: 10, dialogs: [{ open: '#open', dialog: '#modal', close: '#cancel' }] });
   assert.ok(bad.findings.some(x => x.phase === 'entry'));
   assert.ok(bad.findings.some(x => x.phase === 'Tab'));
   assert.ok(bad.findings.some(x => x.phase === 'return-button'));

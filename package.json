@@ -7,7 +7,13 @@
     "lintapple": "./bin/lintapple.js",
     "ui-lint": "./bin/lintapple.js"
   },
-  "exports": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./playwright": {
+      "types": "./src/playwright.d.ts",
+      "default": "./src/playwright.js"
+    }
+  },
   "files": [
     "bin",
     "src",
@@ -20,7 +26,8 @@
     "check": "node bin/lintapple.js",
     "demo": "node demo/server.js",
     "demo:check": "node --test test/demo.test.js",
-    "release:build": "node scripts/build-release.mjs"
+    "release:build": "node scripts/build-release.mjs",
+    "test:playwright": "playwright test --config examples/playwright/playwright.config.js"
   },
   "engines": {
     "node": ">=22"

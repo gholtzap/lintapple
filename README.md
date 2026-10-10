@@ -283,6 +283,54 @@ Focus checks use real Tab navigation. The computed-style check detects common ou
 
 ## App states and CI
 
+### Playwright tests
+
+Install the version on `main` to use this helper:
+
+```sh
+npm install --save-dev github:gholtzap/lintapple
+```
+
+Use `expectUI` in an existing Playwright test. It checks the current page with the same policy and rules as `checkPage`.
+
+```js
+import { test } from '@playwright/test';
+import { expectUI } from 'lintapple/playwright';
+import policy from './ui-policy.json' with { type: 'json' };
+
+test('new project dialog', async ({ page }, testInfo) => {
+  await page.goto('/projects');
+  await page.getByRole('button', { name: 'Add project' }).click();
+  await page.getByRole('dialog').waitFor();
+  await expectUI(page, testInfo, policy);
+});
+```
+
+The policy argument is optional. The helper uses the current browser, page state, and viewport. It does not navigate, sign in, or run a viewport matrix. Set those in your test and wait for the required content before the assertion. Call it again after each state change that needs a check.
+
+Findings fail the assertion. The error lists each rule, selector, result, and fix. The helper attaches `lintapple findings` as JSON, with the page URL, viewport, full findings, exclusions, counts, and coverage. Playwright's HTML report shows the attachment. Its GitHub reporter adds an error annotation at the assertion's test line. Invalid policies and execution errors also fail the test; they do not produce a findings attachment. Do not catch assertion errors in your tests.
+
+Add Playwright's built-in reporters to your existing configuration:
+
+```js
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  reporter: [
+    ['list'],
+    ['html', { open: 'never' }],
+    ...(process.env.GITHUB_ACTIONS ? [['github']] : []),
+  ],
+  use: { screenshot: 'only-on-failure' },
+});
+```
+
+Run `npx playwright test`, then `npx playwright show-report` to open the HTML report. In GitHub Actions, upload `playwright-report/` with `actions/upload-artifact` after the test step, including failed runs. The [Playwright reporter documentation](https://playwright.dev/docs/test-reporters) describes both reporters.
+
+This repository includes a working example in `examples/playwright/`. Run `npm run test:playwright`, then `npx playwright show-report test-results/playwright-report`. The workflow in `.github/workflows/playwright.yml` runs that example, emits GitHub annotations for failures, and saves the HTML report.
+
+### Direct page checks
+
 The CLI checks the initial page at each configured viewport and color preference. For signed-in pages, dialogs, forms, or other states, enter the state in your Playwright test and call the same checker:
 
 ```js
@@ -296,7 +344,7 @@ const result = await checkPage(page, policy);
 expect(result.findings).toEqual([]);
 ```
 
-For use inside this project, import from `./src/index.js`. This package is not published to the npm registry. The production site provides a versioned package download:
+For use inside this project, import from `./src/index.js`. The production site also provides a versioned package download:
 
 ```sh
 npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.8.tgz
