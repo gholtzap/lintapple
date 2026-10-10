@@ -87,7 +87,7 @@ export async function checkUrl(url, input = {}, { ready, timeout = 15000, intera
   const parsed = new URL(url);
   if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) throw new Error('Use an HTTP, HTTPS, or file URL.');
   const policy = validatePolicy(input);
-  if (interactions) validateInteractions(interactions);
+  if (interactions !== undefined) validateInteractions(interactions);
   const browser = await launchBrowser();
   const report = { url, rules: ruleIds, runs: [], findings: [] };
   try {
@@ -104,7 +104,7 @@ export async function checkUrl(url, input = {}, { ready, timeout = 15000, intera
         const findings = result.findings.map(f => ({ ...f, state: 'initial' }));
         const suppressed = result.suppressed.map(f => ({ ...f, state: 'initial' }));
         const accessibilityCoverage = { ...result.accessibilityCoverage };
-        if (interactions) {
+        if (interactions !== undefined) {
           const interaction = await checkInteractions(page, interactions, policy, { timeout });
           findings.push(...interaction.findings);
           suppressed.push(...interaction.suppressed);

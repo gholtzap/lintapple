@@ -425,7 +425,7 @@ This repository includes a working example in `examples/playwright/`. Run `npm r
 For direct page checks inside this project, import `checkPage` from `./src/index.js`. The production site also provides a versioned package download:
 
 ```sh
-npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.15.tgz
+npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.16.tgz
 ```
 
 The [production examples](https://lintapple-demo.vercel.app/demo/) cover the design and accessibility rules. `release.json` records the source commit and file checksums. `npm run release:build` makes the static deployment and package in `test-results/production-stage`. The CLI can also run without package installation through `node bin/lintapple.js`.

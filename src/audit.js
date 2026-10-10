@@ -48,7 +48,21 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         add('numeric-alignment', el, style.textAlign, 'right-aligned numeric table cells', 'Set text-align: right on the numeric column.');
     }
   }
-  const textOf = el => (el.innerText ?? '').replace(/\s+/g, ' ').toLowerCase();
+  const copyText = new Map();
+  const textOf = el => {
+    if (copyText.has(el)) return copyText.get(el);
+    if (el.matches('pre, code, kbd, samp') || !hasVisibleContent(el)) return '';
+    const text = [...el.childNodes].map(node => {
+      if (node.nodeType === Node.TEXT_NODE) return visible(el) ? node.textContent : '';
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+      if (node.tagName === 'BR') return '\n';
+      const content = textOf(node);
+      const display = getComputedStyle(node).display;
+      return display.startsWith('inline') || display === 'contents' ? content : `\n${content}\n`;
+    }).join('').replace(/\s+/g, ' ').toLowerCase();
+    copyText.set(el, text);
+    return text;
+  };
   for (const el of elements.filter(el => !el.closest('pre, code, kbd, samp'))) {
     for (const phrase of policy.bannedCopy) {
       const normalized = phrase.replace(/\s+/g, ' ').toLowerCase();
