@@ -46,7 +46,7 @@ test('corrected page', async ({ page }, testInfo) => {
   reporter: [['json', { outputFile: './results.json' }], ['html', { outputFolder: './html-report', open: 'never' }], ['github']],
 };`);
     let output;
-    try { await run(process.execPath, [resolve('node_modules/playwright/cli.js'), 'test'], { cwd: root, env: { ...process.env, FORCE_COLOR: '0', GITHUB_ACTIONS: 'true' } }); }
+    try { await run(process.execPath, [resolve('node_modules/playwright/cli.js'), 'test'], { cwd: root, env: { ...process.env, FORCE_COLOR: '0', GITHUB_ACTIONS: 'true', GITHUB_WORKSPACE: resolve('.') } }); }
     catch (error) { assert.equal(error.code, 1, error.stderr || error.stdout); output = error.stdout; }
     assert.ok(output, 'The two invalid tests must fail.');
     const report = JSON.parse(await readFile(join(root, 'results.json'), 'utf8'));
@@ -68,7 +68,7 @@ test('corrected page', async ({ page }, testInfo) => {
     assert.equal(findings.url, new URL(`file://${join(root, 'examples/good.html')}`).href);
     assert.deepEqual(findings.viewport, { width: 390, height: 844 });
     assert.match(failed.errors[0].message, /font-size[\s\S]*Expected[\s\S]*Found[\s\S]*Fix:/);
-    assert.match(output, /::error file=checks\.spec\.js,[^\n]*line=12,col=3::/);
+    assert.match(output, /::error file=[^,\n]*checks\.spec\.js,[^\n]*line=12,col=3::/);
     assert.match(output, /font-size/);
     assert.equal(tests[2].tests[0].results[0].attachments.filter(item => item.name === 'lintapple findings').length, 0);
     assert.match(tests[2].tests[0].results[0].errors[0].message, /fontSizes must be a nonempty list/);

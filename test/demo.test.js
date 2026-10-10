@@ -100,7 +100,10 @@ test('demo before pages fail, fixes pass, and all routes and controls work', asy
               }
               await slider.press('End');
               await frame.waitForFunction(() => document.querySelector('#width-value').textContent === `${document.querySelector('#example-width').max} px`);
-              assert.deepEqual((await checkPage(frame)).findings, [], 'The complete label must fit at the largest width.');
+              const wide = await checkPage(frame);
+              const clipped = await frame.locator('.project-name').evaluate(el => el.scrollWidth > el.clientWidth);
+              if (state === 'before' && clipped) assert.ok(wide.findings.length && wide.findings.every(finding => finding.rule === 'content-clipping'), `The before label must report clipping when the font does not fit: ${JSON.stringify(wide.findings)}`);
+              else assert.deepEqual(wide.findings, [], 'The complete label must fit at the largest width.');
               await clean(`Detail ${rule.id} resized ${state}, ${theme}, ${viewport.width}px`);
             }
           }
