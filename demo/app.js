@@ -59,7 +59,7 @@ function render() {
   const rule = rules.find(entry => entry.id === id);
   document.querySelector('.sidebar').innerHTML = navigation(id);
   main.innerHTML = `<details class="mobile-nav"><summary>Browse rules</summary>${navigation(id)}</details>${id ? rule ? detail(rule) : '<div class="empty ui-stack" data-ui-stack><h1>Rule not found</h1><a href="#/">Return to Index</a></div>' : gallery()}`;
-  document.title = `${rule ? rule.title : 'Interface rules'} — lintapple`;
+  document.title = rule ? `${rule.title} — lintapple` : 'lintapple — It should be impossible for AI to make a bad UI.';
   document.body.dataset.ready = 'true';
   lenis?.resize();
 }
