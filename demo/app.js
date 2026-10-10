@@ -15,12 +15,12 @@ const preview = (rule, state, loading = 'lazy') => `<iframe class="preview${['fo
 const stateControls = state => `<div class="state-controls ui-actions" data-ui-actions data-ui-container>${['before', 'after'].map(value => `<button type="button" data-state="${value}" aria-pressed="${value === state}">${value === 'before' ? 'Before' : 'After'}</button>`).join('')}</div>`;
 
 function navigation(id) {
-  return `<nav class="ui-stack" data-ui-stack><a href="#/" ${!id ? 'aria-current="page"' : ''}>Index</a>${groups.map(group => `<div class="nav-group ui-stack" data-ui-stack><p>${group}</p>${rules.filter(rule => rule.group === group).map(rule => `<a href="#/rule/${rule.id}" ${id === rule.id ? 'aria-current="page"' : ''}>${escape(rule.title)}</a>`).join('')}</div>`).join('')}</nav>`;
+  return `<nav class="ui-stack" data-ui-stack><a href="#/" ${!id ? 'aria-current="page"' : ''}>About</a>${groups.map(group => `<div class="nav-group ui-stack" data-ui-stack><p>${group}</p>${rules.filter(rule => rule.group === group).map(rule => `<a href="#/rule/${rule.id}" ${id === rule.id ? 'aria-current="page"' : ''}>${escape(rule.title)}</a>`).join('')}</div>`).join('')}</nav>`;
 }
 
 function gallery() {
   return `<div class="intro ui-stack" data-ui-stack>
-    <h1>Index</h1>
+    <h1>About</h1>
     <p>It should be impossible for AI to make a bad UI.</p>
     <section class="ui-stack" data-ui-stack>
       <h2>Ask your coding agent</h2>
@@ -31,7 +31,7 @@ function gallery() {
       <pre class="fix-code"><code>npm install -D lintapple &amp;&amp; npx lintapple init</code></pre>
     </section>
   </div>
-  <div class="groups ui-stack" data-ui-stack>${groups.map(group => `<section class="rule-group ui-stack" data-ui-stack><h2 class="group-heading">${icon(group)}${group}</h2><div class="rule-grid" data-ui-stack>${rules.filter(rule => rule.group === group).map(rule => card(rule)).join('')}</div></section>`).join('')}</div>`;
+  <div class="groups ui-stack" data-ui-stack><h2>Examples</h2>${groups.map(group => `<section class="rule-group ui-stack" data-ui-stack><h2 class="group-heading">${icon(group)}${group}</h2><div class="rule-grid" data-ui-stack>${rules.filter(rule => rule.group === group).map(rule => card(rule)).join('')}</div></section>`).join('')}</div>`;
 }
 
 function card(rule) {
@@ -46,7 +46,7 @@ function card(rule) {
 function detail(rule) {
   const state = states.get(rule.id);
   return `<article class="detail ui-stack" data-ui-stack data-rule="${rule.id}">
-    <a class="back-link" href="#/">← Index</a>
+    <a class="back-link" href="#/">← About</a>
     <div class="detail-intro ui-stack" data-ui-stack><h1>${escape(rule.title)}</h1><p>${escape(rule.summary)}</p></div>
     <section class="comparison ui-stack" data-ui-stack>${preview(rule, state, 'eager')}${stateControls(state)}</section>
     <section class="ui-stack" data-ui-stack><h2>The fix</h2><pre class="fix-code"><code>${escape(rule.fix)}</code></pre></section>
@@ -58,7 +58,7 @@ function render() {
   const id = requestedId === 'content-clipping' ? 'content-overflow' : requestedId;
   const rule = rules.find(entry => entry.id === id);
   document.querySelector('.sidebar').innerHTML = navigation(id);
-  main.innerHTML = `<details class="mobile-nav"><summary>Browse rules</summary>${navigation(id)}</details>${id ? rule ? detail(rule) : '<div class="empty ui-stack" data-ui-stack><h1>Rule not found</h1><a href="#/">Return to Index</a></div>' : gallery()}`;
+  main.innerHTML = `<details class="mobile-nav"><summary>Browse rules</summary>${navigation(id)}</details>${id ? rule ? detail(rule) : '<div class="empty ui-stack" data-ui-stack><h1>Rule not found</h1><a href="#/">Return to About</a></div>' : gallery()}`;
   document.title = rule ? `${rule.title} — lintapple` : 'lintapple — It should be impossible for AI to make a bad UI.';
   document.body.dataset.ready = 'true';
   lenis?.resize();

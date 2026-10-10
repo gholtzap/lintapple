@@ -210,7 +210,7 @@ test('demo tooltips work on hover, keyboard focus, and Escape in both themes', a
           await control.focus();
           assert.deepEqual((await checkPage(page)).findings, [], `${name} focus, ${theme}, ${width}px`);
         }
-        await page.getByRole('link', { name: '← Index', exact: true }).click();
+        await page.getByRole('link', { name: '← About', exact: true }).click();
         const ids = await page.locator('[id]').evaluateAll(elements => elements.map(el => el.id));
         assert.equal(new Set(ids).size, ids.length, 'Tooltip portals must not leave duplicate IDs after navigation.');
       }

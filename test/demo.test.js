@@ -42,7 +42,7 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
       await page.setViewportSize(viewport);
       await page.goto(`${origin}/demo/`);
       await page.locator('body[data-ready="true"]').waitFor();
-      await page.getByRole('heading', { name: 'Index', level: 1, exact: true }).waitFor();
+      await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
       assert.deepEqual(await page.locator('.intro pre').allTextContents(), [
         'npm install -D lintapple && npx lintapple init',
       ]);
@@ -133,7 +133,7 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
             }
           }
           await page.locator('.back-link').click();
-          await page.getByRole('heading', { name: 'Index', level: 1, exact: true }).waitFor();
+          await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
         }
         assert.equal(await page.locator('[data-state="after"][aria-pressed="true"]').count(), rules.length);
         await clean(`Index after, ${theme}, ${viewport.width}px`);
@@ -184,7 +184,7 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
     await sizeFrame.locator('body[data-state="before"]').waitFor();
     assert.equal(await sizeFrame.evaluate(() => document.getAnimations().length), 0, 'The fallback must change state without animation.');
     await page.goto(`${origin}/demo/#/accessibility`);
-    await page.getByRole('heading', { name: 'Index', level: 1, exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
     assert.equal(await page.locator('a[href="#/accessibility"]').count(), 0);
     await clean('Removed accessibility page returns to Index');
     await page.goto(`${origin}/demo/#/rule/content-clipping`);
@@ -235,7 +235,7 @@ test('Lenis smooths wheel scrolling, respects motion changes, and resets rule na
           };
           requestAnimationFrame(sample);
         });
-        const heading = await page.getByRole('heading', { name: 'Index', level: 1, exact: true }).boundingBox();
+        const heading = await page.getByRole('heading', { name: 'About', level: 1, exact: true }).boundingBox();
         await page.mouse.move(heading.x + 8, heading.y + 8);
         await page.mouse.wheel(0, 600);
         await page.waitForFunction(() => scrollY > 0 && !document.documentElement.classList.contains('lenis-scrolling'));
@@ -256,7 +256,7 @@ test('Lenis smooths wheel scrolling, respects motion changes, and resets rule na
       await page.mouse.wheel(0, 300);
       await page.waitForFunction(() => scrollY > 0 && document.documentElement.classList.contains('lenis-smooth'));
       await page.locator('.brand').click();
-      await page.getByRole('heading', { name: 'Index', level: 1, exact: true }).waitFor();
+      await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
       await page.waitForFunction(() => scrollY === 0 && !document.documentElement.classList.contains('lenis-scrolling'));
       assert.deepEqual(await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(scrollY))))), 0);
     }
