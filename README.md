@@ -4,6 +4,8 @@ Check a rendered page against fixed design rules. No AI model, screenshot baseli
 
 The checker enforces a design policy. It cannot guarantee a good design.
 
+Get the package on [npm](https://www.npmjs.com/package/lintapple).
+
 ## Add to your project
 
 Requires Node.js 22 or later. Run these commands from the project directory.
