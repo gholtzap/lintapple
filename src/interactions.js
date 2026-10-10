@@ -61,10 +61,14 @@ export async function runInteractions(page, input, policy, checkPage, createVisi
     try { await page.waitForFunction(fn, argument, { timeout: plan.timeout }); return true; }
     catch (error) { if (error.name !== 'TimeoutError') throw error; return false; }
   };
-  const contentState = async (selector, expected) => {
+  const contentState = async (selector, expected, expectedText) => {
     // Earlier actions can navigate to a new document.
     const visibility = await page.evaluateHandle(`(${createVisibility.toString()})()`);
-    try { return await wait(({ selector, expected, visibility }) => visibility.hasVisibleContent(document.querySelector(selector)) === expected, { selector, expected, visibility }); }
+    try { return await wait(({ selector, expected, expectedText, visibility }) => {
+      const elements = document.querySelectorAll(selector);
+      if (elements.length > 1) throw new Error(`Interaction selector must match at most one element: ${selector}`);
+      return visibility.hasVisibleContent(elements[0]) === expected && (expectedText === undefined || elements[0]?.textContent.trim() === expectedText);
+    }, { selector, expected, expectedText, visibility }); }
     finally { await visibility.dispose(); }
   };
   const shown = selector => contentState(selector, true);
@@ -218,12 +222,8 @@ export async function runInteractions(page, input, policy, checkPage, createVisi
       else await locator[item.action]({ timeout: plan.timeout });
       const ready = page.locator(item.ready.selector);
       if (await ready.count() > 1) throw new Error(`Ready selector must match at most one element: ${item.ready.selector}`);
-      await ready.waitFor({ state: item.ready.state || 'visible', timeout: plan.timeout });
-      if (item.ready.expectedText !== undefined && !await wait(({ selector, text }) => {
-        const elements = document.querySelectorAll(selector);
-        if (elements.length > 1) throw new Error(`Ready selector must match one element: ${selector}`);
-        return elements[0]?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && elements[0].textContent.trim() === text;
-      }, { selector: item.ready.selector, text: item.ready.expectedText })) throw new Error('Ready text did not match.');
+      if (!await contentState(item.ready.selector, item.ready.state !== 'hidden', item.ready.expectedText))
+        throw new Error(item.ready.expectedText === undefined ? 'Timeout waiting for the ready element.' : 'Ready text did not match.');
       if (await ready.count() > 1) throw new Error(`Ready selector must match at most one element: ${item.ready.selector}`);
       if (await ready.count() === 1) await target(item.ready.selector);
     } catch (error) { throw new Error(`State "${item.name}" could not be checked: ${error.message}`, { cause: error }); }

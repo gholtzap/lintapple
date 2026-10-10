@@ -52,14 +52,14 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   const textOf = el => {
     if (copyText.has(el)) return copyText.get(el);
     if (el.matches('pre, code, kbd, samp') || !hasVisibleContent(el)) return '';
-    const text = [...el.childNodes].map(node => {
+    const text = (el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? el.value : [...el.childNodes].map(node => {
       if (node.nodeType === Node.TEXT_NODE) return visible(el) ? node.textContent : '';
       if (node.nodeType !== Node.ELEMENT_NODE) return '';
       if (node.tagName === 'BR') return '\n';
       const content = textOf(node);
       const display = getComputedStyle(node).display;
       return display.startsWith('inline') || display === 'contents' ? content : `\n${content}\n`;
-    }).join('').replace(/\s+/g, ' ').toLowerCase();
+    }).join('')).replace(/\s+/g, ' ').toLowerCase();
     copyText.set(el, text);
     return text;
   };
@@ -94,7 +94,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   };
   for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
-  for (const el of elements.filter(el => el.matches('[data-ui-stack]')))
+  for (const el of [...document.querySelectorAll('[data-ui-stack]')].filter(hasVisibleContent))
     checkGap([...el.children].filter(visible), 'layout-gap', policy.minLayoutGap);
   let alignmentGroups = 0;
   for (const group of [...document.querySelectorAll('[data-ui-align]')].filter(hasVisibleContent)) {
