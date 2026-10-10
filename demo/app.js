@@ -23,13 +23,16 @@ function gallery() {
     <h1>Index</h1>
     <p>Interface rules, with before and after examples.</p>
     <section class="ui-stack" data-ui-stack>
-      <h2>Try a page</h2>
-      <pre class="fix-code"><code>npx lintapple http://localhost:3000</code></pre>
+      <h2>Install</h2>
+      <pre class="fix-code"><code>npm install -D lintapple &amp;&amp; npx lintapple init</code></pre>
     </section>
     <section class="ui-stack" data-ui-stack>
-      <h2>In your project</h2>
-      <pre class="fix-code"><code>npm install -D lintapple\nnpx lintapple init\nnpm run lint:ui</code></pre>
-      <p>Set your fonts and text sizes in ui-policy.json and your app URL in the lint:ui script. Start your app before the check.</p>
+      <h2>Setup prompt</h2>
+      <p class="fix-code">Set up lintapple, keep existing settings, match ui-policy.json to this design, set the app URL in lint:ui, and check all pages and states at mobile and desktop sizes; fix findings without adding exceptions.</p>
+    </section>
+    <section class="ui-stack" data-ui-stack>
+      <h2>Try a page</h2>
+      <pre class="fix-code"><code>npx lintapple http://localhost:3000</code></pre>
     </section>
     <section class="ui-stack" data-ui-stack>
       <h2>With Playwright</h2>

@@ -44,8 +44,8 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
       await page.locator('body[data-ready="true"]').waitFor();
       await page.getByRole('heading', { name: 'Index', level: 1, exact: true }).waitFor();
       assert.deepEqual(await page.locator('.intro pre').allTextContents(), [
+        'npm install -D lintapple && npx lintapple init',
         'npx lintapple http://localhost:3000',
-        'npm install -D lintapple\nnpx lintapple init\nnpm run lint:ui',
         "import { expectUI } from 'lintapple/playwright';\nawait expectUI(page, testInfo);",
       ]);
       assert.equal(await page.getByRole('link', { name: 'View lintapple on GitHub' }).getAttribute('href'), 'https://github.com/gholtzap/lintapple');
