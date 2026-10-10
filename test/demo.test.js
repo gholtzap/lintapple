@@ -46,7 +46,7 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
       assert.deepEqual(await page.locator('.intro pre').allTextContents(), [
         'npm install -D lintapple && npx lintapple init',
       ]);
-      assert.equal(await page.locator('.intro p.fix-code').innerText(), 'Install and set up https://github.com/gholtzap/lintapple in this project. Configure it for this app’s URL, fonts, and text sizes.');
+      assert.equal(await page.locator('.intro p.fix-code').innerText(), 'Install and set up github.com/gholtzap/lintapple in this project. Configure it for this app’s URL, fonts, and text sizes.');
       assert.equal(await page.getByRole('link', { name: 'View lintapple on GitHub' }).getAttribute('href'), 'https://github.com/gholtzap/lintapple');
       assert.equal(await page.locator('#all-states').count(), 0);
       assert.doesNotMatch(await page.locator('main').innerText(), /Start with the errors|Show all fixes|Show all errors/);

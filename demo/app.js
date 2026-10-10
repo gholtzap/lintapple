@@ -24,7 +24,7 @@ function gallery() {
     <p>Interface rules, with before and after examples.</p>
     <section class="ui-stack" data-ui-stack>
       <h2>Ask your coding agent</h2>
-      <p class="fix-code">Install and set up https://github.com/gholtzap/lintapple in this project. Configure it for this app’s URL, fonts, and text sizes.</p>
+      <p class="fix-code">Install and set up github.com/gholtzap/lintapple in this project. Configure it for this app’s URL, fonts, and text sizes.</p>
     </section>
     <section class="ui-stack" data-ui-stack>
       <h2>Or run this command</h2>
