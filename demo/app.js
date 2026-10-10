@@ -23,8 +23,18 @@ function gallery() {
     <h1>Index</h1>
     <p>Interface rules, with before and after examples.</p>
     <section class="ui-stack" data-ui-stack>
-      <h2>Run</h2>
+      <h2>Try a page</h2>
       <pre class="fix-code"><code>npx lintapple http://localhost:3000</code></pre>
+    </section>
+    <section class="ui-stack" data-ui-stack>
+      <h2>In your project</h2>
+      <pre class="fix-code"><code>npm install -D lintapple\nnpx lintapple init\nnpm run lint:ui</code></pre>
+      <p>Set your fonts and text sizes in ui-policy.json and your app URL in the lint:ui script. Start your app before the check.</p>
+    </section>
+    <section class="ui-stack" data-ui-stack>
+      <h2>With Playwright</h2>
+      <pre class="fix-code"><code>import { expectUI } from 'lintapple/playwright';\nawait expectUI(page, testInfo);</code></pre>
+      <p>Add the assertion after the page is ready. It uses your project policy and attaches findings to failed tests.</p>
     </section>
   </div>
   <div class="groups ui-stack" data-ui-stack>${groups.map(group => `<section class="rule-group ui-stack" data-ui-stack><h2 class="group-heading">${icon(group)}${group}</h2><div class="rule-grid" data-ui-stack>${rules.filter(rule => rule.group === group).map(rule => card(rule)).join('')}</div></section>`).join('')}</div>`;

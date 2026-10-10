@@ -1,8 +1,9 @@
 import { AssertionError } from 'node:assert';
 import { checkPage } from './index.js';
+import { loadProjectPolicy } from './project.js';
 
-export async function expectUI(page, testInfo, policy = {}) {
-  const report = await checkPage(page, policy);
+export async function expectUI(page, testInfo, policy) {
+  const report = await checkPage(page, policy === undefined ? await loadProjectPolicy() : policy);
   if (!report.findings.length) return;
   await testInfo.attach('lintapple findings', {
     body: JSON.stringify({ url: page.url(), viewport: page.viewportSize(), ...report }, null, 2),

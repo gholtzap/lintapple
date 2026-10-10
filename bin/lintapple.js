@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { checkUrl } from '../src/index.js';
+import { initProject, loadProjectPolicy } from '../src/project.js';
 
 const usage = `Usage: lintapple <url> [--config path] [--ready selector] [--interactions path] [--json]
+       lintapple init
+Loads ui-policy.json from the working directory unless --config is set.
 Check the page at each configured viewport. Exit 0: pass, 1: UI findings, 2: execution error.`;
 try {
   const args = process.argv.slice(2);
   if (args.includes('--help')) { console.log(usage); process.exit(0); }
+  if (args[0] === 'init') {
+    if (args.length !== 1) throw new Error('Use lintapple init without additional arguments.');
+    await initProject();
+    process.exit(0);
+  }
   let url, config, ready, interactionsPath, json = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -22,7 +30,7 @@ try {
     else url = arg;
   }
   if (!url) throw new Error(usage);
-  const policy = config ? JSON.parse(await readFile(config, 'utf8')) : {};
+  const policy = await loadProjectPolicy(config);
   const interactions = interactionsPath ? JSON.parse(await readFile(interactionsPath, 'utf8')) : undefined;
   const report = await checkUrl(url, policy, { ready, interactions });
   if (json) console.log(JSON.stringify(report, null, 2));

@@ -4,41 +4,73 @@ Check a rendered page against fixed design rules. No AI model, screenshot baseli
 
 The checker enforces a design policy. It cannot guarantee a good design.
 
-## Run
+## Add to your project
 
-Requires Node.js 22 or later.
-
-Install from the private GitHub repo with an account that has access:
+Requires Node.js 22 or later. Run these commands from the project directory.
 
 ```sh
-npm install --save-dev git+ssh://git@github.com/gholtzap/lintapple.git
-npx playwright install chromium
-npx lintapple http://localhost:3000 --config ui-policy.json
+npm install -D lintapple
+npx lintapple init
 ```
 
-The `ui-lint` command remains available for existing installations.
+Setup creates `ui-policy.json` and adds a `lint:ui` script to `package.json`. It keeps an existing policy and an existing script. Set the policy's fonts and text sizes to match your design. Set your app's URL in the script; the initial URL is `http://localhost:3000`.
 
-To work on the checker:
+### Command-line checks
+
+Start your app, then run:
+
+```sh
+npm run lint:ui
+```
+
+To try a page without project setup:
+
+```sh
+npx lintapple http://localhost:3000
+```
+
+The CLI downloads Chromium on its first run if it is absent, then reuses it. Linux CI can need browser system libraries; use `npx playwright install --with-deps chromium` in the CI setup.
+
+The CLI reads `ui-policy.json` in the working directory. If the file is absent, it uses the package defaults. Use `--config path` to select another policy. An invalid or unreadable policy fails the check.
+
+For content that loads after navigation, use `--ready '[data-app-ready]'`. The selector must be visible when the interface is ready.
+
+Exit codes: `0` means pass, `1` means UI findings, and `2` means the check could not finish. Use `--json` for the full report.
+
+### Existing Playwright tests
+
+Add the helper to a test after the page reaches the required state:
+
+```js
+import { test } from '@playwright/test';
+import { expectUI } from 'lintapple/playwright';
+
+test('new project dialog', async ({ page }, testInfo) => {
+  await page.goto('/projects');
+  await page.getByRole('button', { name: 'Add project' }).click();
+  await page.getByRole('dialog').waitFor();
+  await expectUI(page, testInfo);
+});
+```
+
+The helper reads `ui-policy.json` from the test process's working directory. Pass a policy as the third argument to use it instead. The helper uses your test's browser, viewport, and login state. Findings fail the test and attach a JSON report. Keep your existing Playwright configuration; [report setup](#playwright-reports) uses its HTML and GitHub reporters.
+
+### Which checks need markup?
+
+Font, text size, contrast, accessible names, labels, control size, viewport bounds, and clipping checks work on existing HTML. Spacing between sibling buttons also works without extra attributes.
+
+Stack spacing, alignment, changing numbers, nested corners, and text containment need the [layout attributes](#small-layout-primitives). You can use your existing CSS and components. Set `controlContainers` in the policy to select existing button containers.
+
+### Work on the checker
 
 ```sh
 npm ci
 npx playwright install chromium
-node bin/lintapple.js http://localhost:3000 --config ui-policy.json
-node bin/lintapple.js http://localhost:3000 --config ui-policy.json --json
-```
-
-For a page that loads content after navigation, use `--ready '[data-app-ready]'`. The selector must be visible when the interface is ready. Start your app before you run the checker.
-
-Exit codes: `0` means pass, `1` means design errors, and `2` means the check could not finish. Invalid policy fields, rule IDs, selectors, and HTTP error responses produce exit code `2`.
-
-Run the included example:
-
-```sh
-node bin/lintapple.js "file://$PWD/examples/good.html"
 npm test
+npm run test:playwright
 ```
 
-`npm test` starts a local server and runs the real CLI on valid, invalid, and edge-case pages. It checks mobile and desktop layouts, stable reports, scoped exceptions, and execution errors. It writes a report and receipt to `test-results/`.
+The `ui-lint` command remains available for existing installations. Tests run the real CLI and browser on valid and invalid pages. Reports are saved in `test-results/`.
 
 ## Rule demo
 
@@ -365,30 +397,9 @@ The checker waits for readiness, then runs all page rules with the same policy a
 
 These checks test the UI in the listed states. They do not prove that all workflows were listed or that a saved message means the correct data was stored. Use product assertions for those results.
 
-### Playwright tests
+### Playwright reports
 
-Install the version on `main` to use this helper:
-
-```sh
-npm install --save-dev github:gholtzap/lintapple
-```
-
-Use `expectUI` in an existing Playwright test. It checks the current page with the same policy and rules as `checkPage`.
-
-```js
-import { test } from '@playwright/test';
-import { expectUI } from 'lintapple/playwright';
-import policy from './ui-policy.json' with { type: 'json' };
-
-test('new project dialog', async ({ page }, testInfo) => {
-  await page.goto('/projects');
-  await page.getByRole('button', { name: 'Add project' }).click();
-  await page.getByRole('dialog').waitFor();
-  await expectUI(page, testInfo, policy);
-});
-```
-
-The policy argument is optional. The helper uses the current browser, page state, and viewport. It does not navigate, sign in, or run a viewport matrix. Set those in your test and wait for the required content before the assertion. Call it again after each state change that needs a check.
+Call `expectUI` after each state change that needs a check. It checks the current page with the same policy and rules as `checkPage`. Set viewports and readiness in your tests.
 
 Findings fail the assertion. The error lists each rule, selector, result, and fix. The helper attaches `lintapple findings` as JSON, with the page URL, viewport, full findings, exclusions, counts, and coverage. Playwright's HTML report shows the attachment. Its GitHub reporter adds an error annotation at the assertion's test line. Invalid policies and execution errors also fail the test; they do not produce a findings attachment. Do not catch assertion errors in your tests.
 
@@ -414,7 +425,7 @@ This repository includes a working example in `examples/playwright/`. Run `npm r
 For direct page checks inside this project, import `checkPage` from `./src/index.js`. The production site also provides a versioned package download:
 
 ```sh
-npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.14.tgz
+npm install https://lintapple-demo.vercel.app/downloads/lintapple-0.1.15.tgz
 ```
 
 The [production examples](https://lintapple-demo.vercel.app/demo/) cover the design and accessibility rules. `release.json` records the source commit and file checksums. `npm run release:build` makes the static deployment and package in `test-results/production-stage`. The CLI can also run without package installation through `node bin/lintapple.js`.
