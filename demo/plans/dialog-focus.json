@@ -1,5 +1,5 @@
 {
-  "timeout": 300,
+  "timeout": 1000,
   "maxTabStops": 12,
   "dialogs": [
     {
