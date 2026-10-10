@@ -1,3 +1,5 @@
+<img src="https://lintapple-demo.vercel.app/demo/assets/logo.png" width="96" height="96" alt="lintapple logo">
+
 # lintapple
 
 It should be impossible for AI to make a bad UI.

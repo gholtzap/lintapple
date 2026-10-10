@@ -12,7 +12,8 @@ button { font-size: 14px; font-weight: 500; }
 button:hover { background: var(--ui-background); }
 [hidden] { display: none !important; }
 .site-header { position: fixed; inset: 0 0 auto; z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 24px 32px; background: var(--ui-background); }
-.brand { font-weight: 600; font-size: 16px; letter-spacing: -.4px; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 16px; letter-spacing: -.4px; }
+.brand img { border-radius: 6px; }
 .header-actions { align-items: center; padding: 8px; }
 .icon-button { display: grid; place-items: center; width: 32px; min-width: 32px; min-height: 32px; padding: 6px; border: 0; background: transparent; }
 svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
