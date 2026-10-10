@@ -90,7 +90,10 @@ test('CLI checks boxless page states after HTTP requests and rejects a visible r
     if (request.url === '/open') { response.end('The project is ready for review.'); return; }
     response.setHeader('Content-Type', 'text/html');
     if (request.url === '/navigate') { response.end(shell('<button id="navigate" onclick="location.href=\'/menu-hide\'">Continue</button><p id="status">Ready</p>')); return; }
-    if (request.url.startsWith('/menu-')) { response.end(menu(request.url.slice(6)).replace('<p>Project details</p>', '<p id="status">Second page</p>')); return; }
+    if (request.url.startsWith('/menu-')) {
+      if (request.headers.referer?.endsWith('/navigate')) await new Promise(resolve => setTimeout(resolve, 300));
+      response.end(menu(request.url.slice(6)).replace('<p>Project details</p>', '<p id="status">Second page</p>')); return;
+    }
     const good = request.url !== '/panel-bad';
     response.end(shell(`<button id="open" data-ui-disclosure aria-controls="panel" aria-expanded="false">Project details</button><div id="panel" style="display:contents" hidden><p id="paint"></p></div><script>document.querySelector('#open').onclick=async()=>{const response=await fetch('/open',{method:'POST'});document.querySelector('#paint').textContent=await response.text();document.querySelector('#panel').hidden=false;document.querySelector('#open').setAttribute('aria-expanded','${good}');};</script>`));
   });
@@ -98,14 +101,15 @@ test('CLI checks boxless page states after HTTP requests and rejects a visible r
   try {
     await mkdir('test-results/visibility-fix', { recursive: true });
     for (const route of ['panel-good', 'panel-bad', 'menu-hide', 'menu-replace-hidden', 'menu-remove', 'menu-replace-visible', 'navigate']) {
-      const interaction = route.startsWith('panel-') ? { states: [{ name: 'Project details', action: 'click', selector: '#open', ready: { selector: '#paint', expectedText: 'The project is ready for review.' } }] } : { ...plan(), ...(route === 'navigate' ? { buttons: [{ selector: '#navigate', key: 'Enter', outcome: '#status', expectedText: 'Second page' }] } : {}) };
+      const interaction = route.startsWith('panel-') ? { states: [{ name: 'Project details', action: 'click', selector: '#open', ready: { selector: '#paint', expectedText: 'The project is ready for review.' } }] } : { ...plan(), timeout: 1500, ...(route === 'navigate' ? { buttons: [{ selector: '#navigate', key: 'Enter', outcome: '#status', expectedText: 'Second page' }] } : {}) };
       const path = `test-results/visibility-fix/${route}-plan.json`;
       await writeFile(path, JSON.stringify(interaction));
       let receipt;
       try { receipt = { code: 0, ...await execute(process.execPath, [process.env.LINTAPPLE_CLI || 'bin/lintapple.js', `http://127.0.0.1:${server.address().port}/${route}`, '--interactions', path, '--json']) }; }
       catch (error) { receipt = { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
-      assert.equal(receipt.code, ['panel-bad', 'menu-replace-visible'].includes(route) ? 1 : 0, receipt.stderr);
+      assert.notEqual(receipt.code, 2, receipt.stderr);
       const report = JSON.parse(receipt.stdout);
+      assert.equal(receipt.code, ['panel-bad', 'menu-replace-visible'].includes(route) ? 1 : 0, `${route}: ${JSON.stringify(report.findings)}`);
       assert.ok(report.runs.every(run => run.states[0].findings.length === 0));
       if (route === 'panel-bad') assert.ok(report.findings.every(f => f.rule === 'control-state' && f.state === 'Project details'));
       if (route === 'menu-replace-visible') assert.ok(report.findings.some(f => f.actual === 'the exit key left the menu open'));
