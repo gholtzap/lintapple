@@ -28,6 +28,16 @@ export async function auditAccessibility({ elements, controls, visible, add, eng
     for (const rule of results) for (const node of rule.nodes) {
       const el = node.element;
       if (!scope.has(el) || !visible(el)) continue;
+      // Resolve only the engine's popup-reference uncertainty with unique DOM targets.
+      if (status === 'unresolved' && rule.id === 'aria-valid-attr-value') {
+        const checks = [...node.any, ...node.all, ...node.none];
+        const ids = (el.getAttribute('aria-controls') || '').trim().split(/\s+/).filter(Boolean);
+        const resolved = ['true', 'menu'].includes(el.getAttribute('aria-haspopup')) && ids.length && ids.every(id => {
+          const targets = document.querySelectorAll(`#${CSS.escape(id)}`);
+          return targets.length === 1 && targets[0].getAttribute('role') === 'menu';
+        });
+        if (resolved && checks.length && checks.every(check => check.id === 'aria-valid-attr-value' && check.data?.messageKey === 'controlsWithinPopup')) continue;
+      }
       const id = rules[rule.id];
       const key = `${id}:${elements.indexOf(el)}`;
       if (reported.has(key)) continue;

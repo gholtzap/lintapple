@@ -265,7 +265,7 @@ For an icon button, provide a text tooltip as well as an accessible name:
 
 `aria-describedby` supplies a description, not a replacement for the button name. `data-ui-tooltip="delete-tip"` is also accepted as a visual tooltip contract. The page check verifies a tooltip reference, role, and text. The interaction check verifies hover, keyboard focus, Escape dismissal, and retained trigger focus. A `title` attribute alone does not meet the tooltip design rule. Visually hidden labels and symbol-only labels do not count as visible button text. Disabled buttons are excluded from the tooltip design rule. See [accessible names](https://www.w3.org/WAI/ARIA/apg/practices/names-and-descriptions/) and [tooltips](https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/).
 
-Mark disclosure buttons with `data-ui-disclosure`, set `aria-controls`, and update `aria-expanded` with panel visibility. Menu buttons and ARIA widgets also receive their applicable state checks. A collapsed popup may create its panel when opened; an engine result for that missing panel is reported as unresolved when the engine cannot decide. Check the open state as well.
+Mark disclosure buttons with `data-ui-disclosure`, set `aria-controls`, and update `aria-expanded` with panel visibility. Menu buttons and ARIA widgets also receive their applicable state checks. A collapsed popup may create its panel when opened; an engine result for that missing panel is reported as unresolved when the engine cannot decide. Unique references to existing `role="menu"` targets resolve the engine's popup-reference uncertainty. Missing, ambiguous, or wrong-role targets still require review. Check the open state as well.
 
 The normal CLI does not activate buttons, open dialogs, or change keyboard focus. Use an explicit interaction plan for these checks, with stable test data and actions that are safe to execute:
 
@@ -284,13 +284,51 @@ The normal CLI does not activate buttons, open dialogs, or change keyboard focus
 node bin/lintapple.js http://localhost:3000 --interactions interactions.json --json
 ```
 
-Or call `checkInteractions(page, plan, policy)` from Playwright. It returns `findings`, `suppressed`, `checks`, and `states`. Plans use CSS selectors in the main document. Each action selector must identify one element when used. A tooltip element must exist before its check. A dialog can be created by its open action. Plans run focus checks, tooltips, buttons, dialogs, then named states in the listed order and change the page state. Use fresh fixtures or reset the page between separate plans.
+Or call `checkInteractions(page, plan, policy)` from Playwright. It returns `findings`, `suppressed`, `checks`, and `states`. Plans use CSS selectors in the main document. Each action selector must identify one element when used. A tooltip element must exist before its check. A dialog can be created by its open action. Plans run focus checks, tooltips, buttons, dialogs, tabs, menus, then named states in the listed order and change the page state. Use fresh fixtures or reset the page between separate plans.
 
 Existing plans now run `checkPage()` after keyboard focus, tooltip hover and focus, tooltip dismissal, button activation, and dialog open and close. State names identify the plan item and phase, such as `buttons[0]: Enter` or `dialogs[0]: open for button`. Internal Tab navigation remains part of the keyboard behavior check.
 
 Button checks require `Enter` or `Space` and a declared result element with exact trimmed text. That text must not already be present before activation, so a stale success message cannot produce a pass. Test both keys in separate reset states for custom buttons. The plan activates each listed button once. Each dialog plan opens the dialog twice: once to test its close button and once to test Escape. It checks initial focus, forward and backward focus containment, and focus return. `returnFocus` can name a different logical workflow target. Moving to browser controls is not treated as focus escaping into background page content. See [modal dialog guidance](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/).
 
-Focus checks use real Tab navigation. The computed-style check detects common outlines, shadows, and color changes; a missing detectable indicator is unresolved because custom painted indicators need visual review. Occlusion checks use viewport bounds and hit-test samples. A fully covering opaque box is a failure; other covered samples are unresolved. These checks cannot prove indicator contrast, detect every painted overlay, or validate custom composite-widget arrow-key navigation.
+Focus checks use real Tab navigation. The computed-style check detects common outlines, shadows, and color changes; a missing detectable indicator is unresolved because custom painted indicators need visual review. Occlusion checks use viewport bounds and hit-test samples. A fully covering opaque box is a failure; other covered samples are unresolved. These checks cannot prove indicator contrast or detect every painted overlay.
+
+### Tabs and menus
+
+Add `tabs` and `menus` to an interaction plan to check composite widgets with real keyboard input. Each widget needs a `selector` and 1 to 100 `steps`. Each step declares a key and the expected focus selector. Each selector must identify one element in the main document when the step runs.
+
+```json
+{
+  "tabs": [{
+    "selector": "#case-tabs",
+    "steps": [
+      { "key": "ArrowRight", "focus": "#records-tab", "selected": "#overview-tab" },
+      { "key": "Enter", "focus": "#records-tab", "selected": "#records-tab" },
+      { "key": "ArrowLeft", "focus": "#overview-tab", "selected": "#records-tab" },
+      { "key": "Space", "focus": "#overview-tab", "selected": "#overview-tab" }
+    ]
+  }],
+  "menus": [{
+    "selector": "#case-menu",
+    "open": "#case-actions",
+    "openKey": "Enter",
+    "steps": [
+      { "key": "ArrowDown", "focus": "#show-notes" },
+      { "key": "Space", "focus": "#show-notes", "checked": [{ "selector": "#show-notes", "value": true }] },
+      { "key": "Escape", "focus": "#case-actions" }
+    ]
+  }]
+}
+```
+
+This tab example uses manual activation. For automatic activation, set `selected` to the newly focused tab after each arrow key. The checker requires one selected tab, valid `aria-selected` values, and linked, labelled tab panels whose visibility matches selection. Every tab step needs a `selected` selector, including steps that leave the tab list. Enter and Space must select the focused tab.
+
+Menu plans can check popup menus, menubars, and nested menus inside the declared widget. A popup menu must start closed. `open` names its keyboard-reachable opener. `openKey` defaults to `Enter`; `Space`, `ArrowDown`, and `ArrowUp` are also accepted. Opening must focus the first item, or the last item for `ArrowUp`. Omit `open` for a widget that is already open or a menubar. The checker verifies the opener's `aria-haspopup` and `aria-expanded` states and each submenu's expanded state against visibility.
+
+The accepted step keys are `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `Home`, `End`, `Enter`, `Space`, `Escape`, `Tab`, and `Shift+Tab`. Declare the keys and results required by your widget: horizontal or vertical movement, wrapping or stopping at the end, optional Home and End keys, submenu entry and return, and Escape dismissal. Both direct item focus and `aria-activedescendant` on a containing focused element are supported. The checker does not insert focus with JavaScript to make a step pass.
+
+For checkbox or radio activation, `checked` must include the activated item and its expected value. Use booleans, or `"mixed"` for a checkbox. For an enabled checkbox, the expected state must differ before activation. For an enabled radio item, activation must set its checked state to true. Radio checks also reject multiple checked items in a group. Groups use `role="group"`, or separators within the same menu. Navigation keys must keep existing checked states unchanged. To verify an action item, declare `outcome` and `expectedText`, as in button plans. The result must differ before activation. A submenu action can instead declare focus on its child item. An action without a result cannot prove activation and is rejected.
+
+Findings use the existing `keyboard-operation` and `control-state` rules, scoped exceptions, and coverage reports. Page checks also run after menu opening and each key step. Steps stop after a focus failure so that later keys cannot activate unrelated controls. The checker tests only declared keys and states; it does not prove complete widget behavior. It checks DOM descendants in the main document, not shadow roots, frames, or items attached through `aria-owns`. Use separate plans for separate popup menus. See the W3C [tabs](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/), [menu and menubar](https://www.w3.org/WAI/ARIA/apg/patterns/menubar/), and [menu button](https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/) patterns.
 
 `accessibilityCoverage` records the page rules and the explicit interaction checks. Without a plan, interaction behavior is marked untested. A passing page check does not prove keyboard or dialog behavior or full accessibility. Check each route and relevant state.
 

@@ -1,10 +1,11 @@
 import { finding } from './report.js';
+import { validateWidgets, runWidgets } from './widgets.js';
 
 export function validateInteractions(plan) {
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) throw new Error('Interaction plan must be an object.');
-  const fields = ['focus', 'buttons', 'tooltips', 'dialogs', 'states', 'timeout', 'maxTabStops'];
+  const fields = ['focus', 'buttons', 'tooltips', 'dialogs', 'tabs', 'menus', 'states', 'timeout', 'maxTabStops'];
   for (const key of Object.keys(plan)) if (!fields.includes(key)) throw new Error(`Unknown interaction field: ${key}`);
-  const result = { focus: [], buttons: [], tooltips: [], dialogs: [], states: [], timeout: 1500, maxTabStops: 100, ...plan };
+  const result = { focus: [], buttons: [], tooltips: [], dialogs: [], tabs: [], menus: [], states: [], timeout: 1500, maxTabStops: 100, ...plan };
   for (const [key, max] of [['timeout', 10000], ['maxTabStops', 500]]) if (!Number.isInteger(result[key]) || result[key] < 1 || result[key] > max) throw new Error(`${key} must be an integer from 1 to ${max}.`);
   for (const kind of ['focus', 'buttons', 'tooltips', 'dialogs']) {
     if (!Array.isArray(result[kind]) || result[kind].length > 100) throw new Error(`${kind} must be a list of at most 100 interaction checks.`);
@@ -16,6 +17,7 @@ export function validateInteractions(plan) {
       if (item.returnFocus !== undefined && (typeof item.returnFocus !== 'string' || !item.returnFocus.trim())) throw new Error('returnFocus must be a selector.');
     }
   }
+  validateWidgets(result);
   if (!Array.isArray(result.states) || result.states.length > 100) throw new Error('states must be a list of at most 100 named page checks.');
   const names = new Set(['initial']);
   for (const item of result.states) {
@@ -206,6 +208,7 @@ export async function runInteractions(page, input, policy, checkPage) {
       await inspect(`dialogs[${index}]: close with ${closeMethod}`);
     }
   }
+  await runWidgets(page, plan, { target, record, wait, reach, shown, hidden, inspect });
   for (const item of plan.states) {
     try {
       await page.evaluate(({ selector, ready }) => { document.querySelector(selector); document.querySelector(ready.selector); }, item);
