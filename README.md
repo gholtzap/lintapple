@@ -1,6 +1,6 @@
 # lintapple
 
-Check rendered pages for font, spacing, contrast, and layout errors.
+It should be impossible for AI to make a bad UI.
 
 [npm](https://www.npmjs.com/package/lintapple) · [Demo](https://lintapple-demo.vercel.app/demo/)
 

@@ -21,7 +21,7 @@ function navigation(id) {
 function gallery() {
   return `<div class="intro ui-stack" data-ui-stack>
     <h1>Index</h1>
-    <p>Interface rules, with before and after examples.</p>
+    <p>It should be impossible for AI to make a bad UI.</p>
     <section class="ui-stack" data-ui-stack>
       <h2>Ask your coding agent</h2>
       <p class="fix-code">Install and set up github.com/gholtzap/lintapple in this project. Configure it for this app’s URL, fonts, and text sizes.</p>
