@@ -28,5 +28,16 @@ const scan = async directory => {
 for (const directory of ['demo', 'examples', 'downloads']) await scan(directory);
 const release = { version: pkg.version, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), package: `downloads/${packed.filename}`, packageIntegrity: packed.integrity, hashes };
 await writeFile(join(stage, 'release.json'), JSON.stringify(release, null, 2));
-await writeFile(join(stage, 'vercel.json'), JSON.stringify({ redirects: [{ source: '/', destination: '/demo/', permanent: false }], headers: [{ source: '/(.*)', headers: [{ key: 'Cache-Control', value: 'no-store' }] }] }, null, 2));
+await writeFile(join(stage, 'vercel.json'), JSON.stringify({
+  redirects: [
+    { source: '/demo', destination: 'https://lintapple.vercel.app/', permanent: true },
+    { source: '/demo/:path*', destination: 'https://lintapple.vercel.app/:path*', permanent: true },
+    { source: '/:path*', has: [{ type: 'host', value: 'lintapple-demo.vercel.app' }], destination: 'https://lintapple.vercel.app/:path*', permanent: true },
+  ],
+  rewrites: [
+    { source: '/', destination: '/demo/index.html' },
+    ...Object.keys(hashes).filter(path => path.startsWith('demo/')).map(path => ({ source: `/${path.slice(5)}`, destination: `/${path}` })),
+  ],
+  headers: [{ source: '/(.*)', headers: [{ key: 'Cache-Control', value: 'no-store' }] }],
+}, null, 2));
 console.log(JSON.stringify({ stage, version: pkg.version, sourceCommit: release.sourceCommit, package: release.package, files: Object.keys(hashes).length }));

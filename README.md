@@ -1,10 +1,10 @@
-<img src="https://lintapple-demo.vercel.app/demo/assets/logo.png" width="96" height="96" alt="lintapple logo">
+<img src="https://lintapple.vercel.app/assets/logo.png" width="96" height="96" alt="lintapple logo">
 
 # lintapple
 
 It should be impossible for AI to make a bad UI.
 
-[npm](https://www.npmjs.com/package/lintapple) · [Demo](https://lintapple-demo.vercel.app/demo/)
+[npm](https://www.npmjs.com/package/lintapple) · [Demo](https://lintapple.vercel.app/)
 
 ## Install
 
