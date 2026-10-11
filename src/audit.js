@@ -44,14 +44,15 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       numericElements++;
       if (!style.fontVariantNumeric.split(/\s+/).includes('tabular-nums') && !/['"]tnum['"](?:\s+(?:1|on))?(?:\s*,|$)/.test(style.fontFeatureSettings))
         add('tabular-numbers', el, style.fontVariantNumeric, 'tabular digits', 'Set font-variant-numeric: tabular-nums. Use a font that supports tabular figures.');
-      if (numericCell && style.textAlign !== 'right' && !(style.textAlign === 'end' && style.direction === 'ltr'))
+      if (numericCell && style.textAlign !== 'right' && style.textAlign !== (style.direction === 'rtl' ? 'start' : 'end'))
         add('numeric-alignment', el, style.textAlign, 'right-aligned numeric table cells', 'Set text-align: right on the numeric column.');
     }
   }
   const copyText = new Map();
   const textOf = el => {
     if (copyText.has(el)) return copyText.get(el);
-    if (el.matches('pre, code, kbd, samp') || !hasVisibleContent(el)) return '';
+    if (el.matches('pre, code, kbd, samp')) return '\0';
+    if (!hasVisibleContent(el)) return '';
     const text = (el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? el.value : [...el.childNodes].map(node => {
       if (node.nodeType === Node.TEXT_NODE) return visible(el) ? node.textContent : '';
       if (node.nodeType !== Node.ELEMENT_NODE) return '';
@@ -66,7 +67,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const el of elements.filter(el => !el.closest('pre, code, kbd, samp'))) {
     for (const phrase of policy.bannedCopy) {
       const normalized = phrase.replace(/\s+/g, ' ').toLowerCase();
-      if (textOf(el).includes(normalized) && ![...el.children].some(child => visible(child) && textOf(child).includes(normalized)))
+      if (textOf(el).includes(normalized) && ![...el.children].some(child => textOf(child).includes(normalized)))
         add('copy', el, phrase, 'text without prohibited phrases', 'Remove the phrase or use specific text that helps the user.');
     }
   }
