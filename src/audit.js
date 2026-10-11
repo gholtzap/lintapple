@@ -19,13 +19,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
   const suppressed = [];
-  const { textRects, visible, hasVisibleContent } = visibility;
+  const { textRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const elements = [...document.querySelectorAll('body, body *')].filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
   const controls = elements.filter(el => el.matches('button, [role="button"], input[type="button"], input[type="submit"], input[type="reset"]'));
   const isText = el => [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim()) || el.matches('input, textarea, select');
+  const checkFontSize = (el, style, pseudo = '') => {
+    const size = parseFloat(style.fontSize);
+    const sizes = policy.typeRules.find(rule => el.closest(rule.selector))?.sizes ?? policy.fontSizes;
+    if (!sizes.some(allowed => Math.abs(size - allowed) < 0.1))
+      add('font-size', el, `${size}px`, `one of ${sizes.join(', ')}px`, 'Use a configured size for this text role.', undefined, { selector: `${selector(el)}${pseudo}` });
+  };
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el);
@@ -33,11 +39,10 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const family = style.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '');
       if (!policy.fonts.some(font => font.toLowerCase() === family.toLowerCase()))
         add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.');
-      const size = parseFloat(style.fontSize);
-      const sizes = policy.typeRules.find(rule => el.closest(rule.selector))?.sizes ?? policy.fontSizes;
-      if (!sizes.some(allowed => Math.abs(size - allowed) < 0.1))
-        add('font-size', el, `${size}px`, `one of ${sizes.join(', ')}px`, 'Use a configured size for this text role.');
+      checkFontSize(el, style);
     }
+    if (!el.closest('pre, code, kbd, samp'))
+      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFontSize(el, textStyle, pseudo);
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test(el.textContent.trim()) && /\d/.test(el.textContent);
     if (el.matches('[data-ui-number]') || numericCell) {
