@@ -51,7 +51,7 @@ test('an existing project installs the package, keeps its files, and uses one po
     assert.equal(await readFile(join(root, 'package.json'), 'utf8'), before);
     await writeFile(join(root, 'chosen.json'), policySource);
     assert.deepEqual(JSON.parse((await command([url, '--config', 'chosen.json', '--json'])).stdout).findings, []);
-    assert.match((await failure([url, '--config', 'absent.json'])).stderr, /ENOENT/);
+    assert.match((await failure([url, '--config', 'absent.json'])).stderr, /Cannot find "absent\.json"/);
     await writeFile(join(root, 'ui-policy.json'), policySource);
     await writeFile(join(root, 'playwright.config.js'), `export default { testMatch: 'adoption.spec.js', workers: 1, reporter: [['json', {outputFile: 'results.json'}]], use: {viewport: {width: 390, height: 844}} };`);
     await writeFile(join(root, 'adoption.spec.js'), `
