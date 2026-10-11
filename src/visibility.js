@@ -10,11 +10,18 @@ export function createVisibility() {
     }
     return rects;
   };
+  const generatedTextStyles = el => ['::before', '::after'].flatMap(pseudo => {
+    const style = getComputedStyle(el, pseudo);
+    const literal = style.content.match(/^"((?:[^"\\]|\\.)*)"/)?.[1];
+    const text = literal?.replace(/\\([\da-f]{1,6})\s?|\\(.)/gi, (_, hex, escaped) => hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : escaped);
+    if (!text?.trim() || style.display === 'none' || style.visibility !== 'visible' || parseFloat(style.opacity) === 0 || parseFloat(style.fontSize) === 0) return [];
+    return [{ pseudo, style }];
+  });
   const visible = el => {
     if (!el?.isConnected || el.closest('[inert]')) return false;
     const bounds = el.getBoundingClientRect();
     if (el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && bounds.width > 0 && bounds.height > 0) return true;
-    if (getComputedStyle(el).visibility !== 'visible' || !textRects(el).length) return false;
+    if (!generatedTextStyles(el).length && (getComputedStyle(el).visibility !== 'visible' || !textRects(el).length)) return false;
     // Boxless elements can paint text. Opacity applies only to ancestor boxes.
     for (let node = el; node; node = node.parentElement) {
       const style = getComputedStyle(node);
@@ -23,5 +30,5 @@ export function createVisibility() {
     return true;
   };
   const hasVisibleContent = el => !!el?.isConnected && (visible(el) || [...el.querySelectorAll('*')].some(visible));
-  return { textRects, visible, hasVisibleContent };
+  return { textRects, visible, hasVisibleContent, generatedTextStyles };
 }
