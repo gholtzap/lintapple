@@ -1,21 +1,24 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { checkUrl } from '../src/index.js';
-import { initProject, loadProjectPolicy } from '../src/project.js';
+import { initProject, loadProjectPolicy, parseJson } from '../src/project.js';
+import { formatCliError } from '../src/cli-error.js';
 
 const usage = `Usage: lintapple <url> [--config path] [--ready selector] [--interactions path] [--json]
        lintapple init
 Loads ui-policy.json from the working directory unless --config is set.
+Domains use HTTPS by default. Localhost and loopback addresses use HTTP.
 Check the page at each configured viewport. Exit 0: pass, 1: UI findings, 2: execution error.`;
+const args = process.argv.slice(2);
+let url;
 try {
-  const args = process.argv.slice(2);
   if (args.includes('--help')) { console.log(usage); process.exit(0); }
   if (args[0] === 'init') {
     if (args.length !== 1) throw new Error('Use lintapple init without additional arguments.');
     await initProject();
     process.exit(0);
   }
-  let url, config, ready, interactionsPath, json = false;
+  let config, ready, interactionsPath, json = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--json') json = true;
@@ -25,13 +28,20 @@ try {
       if (arg === '--config') config = value;
       else if (arg === '--interactions') interactionsPath = value;
       else ready = value;
-    } else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
+    } else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}. Use lintapple <url>. Run lintapple --help for options.`);
     else if (url) throw new Error('Provide one URL.');
     else url = arg;
   }
   if (!url) throw new Error(usage);
+  // A host followed by a numeric port is not a URL scheme.
+  if (!/^[a-z][a-z\d+.-]*:(?!\d+(?:[/?#]|$))/i.test(url)) {
+    const parsed = new URL(`https://${url}`);
+    const local = parsed.hostname === 'localhost' || parsed.hostname === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(parsed.hostname);
+    if (local) parsed.protocol = 'http:';
+    if (local || parsed.hostname.includes('.')) url = parsed.href;
+  }
   const policy = await loadProjectPolicy(config);
-  const interactions = interactionsPath ? JSON.parse(await readFile(interactionsPath, 'utf8')) : undefined;
+  const interactions = interactionsPath ? parseJson(await readFile(interactionsPath, 'utf8'), interactionsPath) : undefined;
   const report = await checkUrl(url, policy, { ready, interactions });
   if (json) console.log(JSON.stringify(report, null, 2));
   else {
@@ -42,4 +52,8 @@ try {
     if (suppressed) console.log(`\n${suppressed} findings excluded by policy. See the JSON report for reasons.`);
   }
   process.exitCode = report.findings.length ? 1 : 0;
-} catch (error) { console.error(`UI check could not finish: ${error.message}`); process.exitCode = 2; }
+} catch (error) {
+  const message = formatCliError(error, { url, initializing: args[0] === 'init' });
+  console.error(`UI check could not finish: ${message}`);
+  process.exitCode = 2;
+}

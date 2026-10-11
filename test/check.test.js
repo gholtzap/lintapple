@@ -41,6 +41,40 @@ function cli(args) {
   });
 }
 
+test('CLI gives a page URL example for invalid URL arguments', async () => {
+  for (const input of ['lint', 'http://']) {
+    const result = await cli([input]);
+    assert.equal(result.code, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Expected a page URL/);
+    assert.ok(result.stderr.includes(JSON.stringify(input)));
+    assert.match(result.stderr, /Include http:\/\/, https:\/\/, or file:\/\/\./);
+    assert.match(result.stderr, /Example: lintapple http:\/\/localhost:3000/);
+    assert.match(result.stderr, /lintapple --help/);
+  }
+});
+
+test('CLI supplies a scheme and preserves explicit schemes and URL parts', async () => {
+  const cases = [
+    ['example.test:1/path?x=1#section', 'https://example.test:1/path?x=1#section'],
+    ['127.example.test:1/path', 'https://127.example.test:1/path'],
+    ['localhost:1/path', 'http://localhost:1/path'],
+    ['127.0.0.1:1/path', 'http://127.0.0.1:1/path'],
+    ['[::1]:1/path', 'http://[::1]:1/path'],
+    ['http://example.test:1/path', 'http://example.test:1/path'],
+    ['https://localhost:1/path', 'https://localhost:1/path'],
+  ];
+  const results = [];
+  for (const [input, expected] of cases) {
+    const result = await cli([input]);
+    assert.equal(result.code, 2);
+    assert.ok(result.stderr.includes(`ERR_UNSAFE_PORT at ${expected}`), result.stderr);
+    results.push({ input, expected, exitCode: result.code, stderr: result.stderr });
+  }
+  await mkdir('test-results', { recursive: true });
+  await writeFile('test-results/url-defaults.json', JSON.stringify(results, null, 2));
+});
+
 test('CLI checks real pages, reports stable failures, and rejects invalid input', async () => {
   const server = createServer((req, res) => {
     if (req.url === '/missing' || req.url === '/invalid.woff2') { res.writeHead(404); return res.end('Missing'); }
@@ -58,6 +92,11 @@ test('CLI checks real pages, reports stable failures, and rejects invalid input'
     assert.equal(passed.findings.length, 0);
     assert.equal(passed.runs.length, 2);
     assert.ok(passed.runs.every(run => run.elements > 0));
+    for (const host of ['127.0.0.1', 'localhost']) {
+      const implicit = await cli([`${host}:${server.address().port}`, '--json']);
+      assert.equal(implicit.code, 0, implicit.stderr);
+      assert.equal(JSON.parse(implicit.stdout).url, `http://${host}:${server.address().port}/`);
+    }
     const fail = await cli([`${url}/bad`, '--json']);
     assert.equal(fail.code, 1, fail.stderr);
     const report = JSON.parse(fail.stdout);

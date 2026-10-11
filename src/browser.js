@@ -13,9 +13,20 @@ export async function launchBrowser() {
     console.error('Downloading Chromium.');
     installation = new Promise((resolve, reject) => {
       const cli = fileURLToPath(new URL('cli.js', import.meta.resolve('playwright/package.json')));
-      const child = spawn(process.execPath, [cli, 'install', 'chromium', '--only-shell'], { stdio: ['ignore', 2, 2] });
+      const child = spawn(process.execPath, [cli, 'install', 'chromium', '--only-shell'], { stdio: ['ignore', 2, 'pipe'] });
+      let stderr = '', noSpace = false;
+      child.stderr.on('data', chunk => {
+        stderr = (stderr + chunk).slice(-8192);
+        noSpace ||= stderr.includes('ENOSPC');
+      });
       child.on('error', reject);
-      child.on('close', (code, signal) => code === 0 ? resolve() : reject(new Error(`Chromium setup failed (${signal || code}). See the download error above, then run lintapple again.`)));
+      child.on('close', (code, signal) => {
+        if (!noSpace && stderr) process.stderr.write(stderr);
+        if (code === 0) return resolve();
+        const error = new Error(`Chromium setup failed (${signal || code}). See the download error above, then run lintapple again.`);
+        if (noSpace) error.code = 'ENOSPC';
+        reject(error);
+      });
     }).finally(() => { installation = undefined; });
   }
   await installation;

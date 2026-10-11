@@ -2,6 +2,14 @@ import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { defaultPolicy, validatePolicy } from './index.js';
 
+export function parseJson(source, path) {
+  try { return JSON.parse(source); }
+  catch (error) {
+    error.message = `Invalid JSON in ${JSON.stringify(path)}: ${error.message}`;
+    throw error;
+  }
+}
+
 export async function loadProjectPolicy(path) {
   let source;
   try { source = await readFile(path ?? 'ui-policy.json', 'utf8'); }
@@ -9,12 +17,12 @@ export async function loadProjectPolicy(path) {
     if (path === undefined && error.code === 'ENOENT') return {};
     throw error;
   }
-  return validatePolicy(JSON.parse(source));
+  return validatePolicy(parseJson(source, path ?? 'ui-policy.json'));
 }
 
 export async function initProject() {
   const original = await readFile('package.json', 'utf8');
-  const pkg = JSON.parse(original);
+  const pkg = parseJson(original, 'package.json');
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) throw new Error('package.json must be an object.');
   if (pkg.scripts !== undefined && (!pkg.scripts || typeof pkg.scripts !== 'object' || Array.isArray(pkg.scripts))) throw new Error('package.json scripts must be an object.');
   await loadProjectPolicy();

@@ -97,7 +97,10 @@ export async function checkUrl(url, input = {}, { ready, timeout = 15000, intera
         const page = await context.newPage();
         page.setDefaultTimeout(timeout);
         const response = await page.goto(url, { waitUntil: 'load', timeout });
-        if (response && !response.ok()) throw new Error(`Page returned HTTP ${response.status()}.`);
+        if (response && !response.ok()) {
+          if (response.status() === 404) throw new Error(`Page not found: ${response.url()} (HTTP 404). Check the page path.`);
+          throw new Error(`Page returned HTTP ${response.status()} at ${response.url()}.`);
+        }
         if (ready) await page.locator(ready).waitFor({ state: 'visible' });
         const result = await checkPageWithin(page, policy, timeout);
         const states = [{ name: 'initial', url: page.url(), ...result }];
