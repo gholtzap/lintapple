@@ -68,3 +68,7 @@ Add these attributes for checks that need layout information:
 
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

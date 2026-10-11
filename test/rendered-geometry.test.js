@@ -14,6 +14,56 @@ const text = '<span id="subject" style="display:contents;font-size:17px;color:#a
 const escape = '<div id="subject" style="position:absolute;left:-40px;top:48px;width:100px;height:40px;background:#a00000"></div>';
 const radius = (scale, inner = 12) => `<div data-ui-radius style="width:120px;padding:8px;border-radius:20px;transform:scale(${scale});transform-origin:top left"><div data-ui-radius-inner style="height:64px;border-radius:${inner}px"></div></div>`;
 
+test('zero-size clipping boxes produce findings instead of stopping the CLI or page API', async () => {
+  const cases = {
+    flex: '<div style="display:flex;width:150px"><span style="flex:none">a long enough label to fill the row</span><span id="clip" style="flex:1 1 0%;min-width:0;overflow:hidden;white-space:nowrap">summary</span></div>',
+    height: '<div id="clip" style="width:118px;height:0;overflow:hidden">summary</div>',
+    both: '<div id="clip" style="width:0;height:0;overflow:hidden">summary</div>',
+    scaled: '<div id="clip" style="width:0;height:24px;overflow:hidden;transform:scale(.5);transform-origin:top left">summary</div>',
+    empty: '<div style="display:flex;width:150px;align-items:center"><span style="flex:none;width:32px">Row</span><span id="clip" style="width:118px;height:0;overflow:hidden"></span></div>',
+    good: '<div id="clip" style="width:118px;overflow:hidden">summary</div>',
+  };
+  const server = createServer((request, response) => {
+    response.setHeader('Content-Type', 'text/html');
+    response.end(shell(cases[request.url.slice(1)]));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch();
+  try {
+    await mkdir('test-results', { recursive: true });
+    const policy = 'test-results/zero-size-policy.json';
+    await writeFile(policy, JSON.stringify({ colorSchemes: ['light', 'dark'] }));
+    for (const [name] of Object.entries(cases)) {
+      const url = `http://127.0.0.1:${server.address().port}/${name}`;
+      const clipped = !['empty', 'good'].includes(name);
+      let output;
+      try { output = { code: 0, ...await execute(process.execPath, [process.env.LINTAPPLE_CLI || 'bin/lintapple.js', url, '--config', policy, '--json']) }; }
+      catch (error) { if (typeof error.code !== 'number') throw error; output = { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
+      assert.equal(output.code, clipped ? 1 : 0, `${name}: ${output.stderr}`);
+      const report = JSON.parse(output.stdout);
+      assert.equal(report.runs.length, 4);
+      for (const run of report.runs) {
+        const page = await browser.newPage({ viewport: run.viewport, colorScheme: run.colorScheme });
+        try {
+          await page.goto(url);
+          const result = await checkPage(page);
+          if (clipped) {
+            assert.ok(run.states[0].findings.some(f => f.rule === 'content-clipping'), name);
+            assert.ok(result.findings.some(f => f.rule === 'content-clipping'), name);
+          } else {
+            assert.deepEqual(run.states[0].findings, [], name);
+            assert.deepEqual(result.findings, [], name);
+          }
+        } finally { await page.close(); }
+      }
+      await writeFile(`test-results/zero-size-${name}.json`, JSON.stringify(report, null, 2));
+    }
+  } finally {
+    await browser.close();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('painted text, containing blocks, and scaled radii use rendered geometry', async () => {
   const browser = await chromium.launch();
   try {

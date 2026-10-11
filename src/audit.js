@@ -139,8 +139,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   const clientBounds = container => {
     const bounds = container.getBoundingClientRect();
     // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
-    const scaleX = bounds.width / container.offsetWidth;
-    const scaleY = bounds.height / container.offsetHeight;
+    const scaleX = container.offsetWidth ? bounds.width / container.offsetWidth : 1;
+    const scaleY = container.offsetHeight ? bounds.height / container.offsetHeight : 1;
     const left = bounds.left + container.clientLeft * scaleX;
     const top = bounds.top + container.clientTop * scaleY;
     const result = { left, top, right: left + container.clientWidth * scaleX, bottom: top + container.clientHeight * scaleY };
