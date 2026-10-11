@@ -30,7 +30,9 @@ const release = { version: pkg.version, sourceCommit: execFileSync('git', ['rev-
 await writeFile(join(stage, 'release.json'), JSON.stringify(release, null, 2));
 await writeFile(join(stage, 'vercel.json'), JSON.stringify({
   redirects: [
+    { source: '/', has: [{ type: 'host', value: 'lintapple-demo.vercel.app' }], destination: 'https://lintapple.vercel.app/', permanent: true },
     { source: '/demo', destination: 'https://lintapple.vercel.app/', permanent: true },
+    { source: '/demo/', destination: 'https://lintapple.vercel.app/', permanent: true },
     { source: '/demo/:path*', destination: 'https://lintapple.vercel.app/:path*', permanent: true },
     { source: '/:path*', has: [{ type: 'host', value: 'lintapple-demo.vercel.app' }], destination: 'https://lintapple.vercel.app/:path*', permanent: true },
   ],
