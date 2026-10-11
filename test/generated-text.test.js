@@ -20,6 +20,7 @@ test('generated label sizes obey the text role without checking hidden or empty 
       for (const [css, pseudo] of [
         ['.generated::before{content:attr(data-label);font-size:20px}', '::before'],
         ['.generated::after{content:"Email";font-size:20px}', '::after'],
+        ['.generated::before{content:"Email";display:contents;opacity:0;font-size:20px}', '::before'],
         ['.generated{display:contents}.generated::before{content:"Email";font-size:20px}', '::before'],
         ['.generated::before{content:"\\45 mail";font-size:20px}', '::before'],
       ]) {
