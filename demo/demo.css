@@ -58,8 +58,12 @@ h3 { font-size: 18px; font-weight: 500; letter-spacing: -.4px; }
 .shiki span { color: var(--shiki-light); }
 :root[data-theme="dark"] .shiki span { color: var(--shiki-dark); }
 .install-command { gap: 8px; }
-.code-actions { justify-content: flex-end; align-items: center; }
-.copy-status { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); }
+.command-code { position: relative; }
+.command-code .fix-code { padding-inline-end: 64px; min-height: 56px; }
+.copy-button { position: absolute; top: 12px; right: 12px; }
+.copy-button svg { stroke-width: 1; }
+.copy-status { font-size: 12px; color: var(--muted); }
+.copy-status:empty { display: none; }
 .empty { padding: 32px 0; }
 @media (max-width: 1023px) { .sidebar { display: none; } .mobile-nav { display: block; margin-bottom: 24px; font-size: 14px; } .mobile-nav summary { cursor: pointer; padding: 8px 0; } .mobile-nav nav { padding: 16px 0; } }
 @media (max-width: 639px) { .site-header { padding: 8px 20px; } main { padding: 24px 28px 48px; } .rule-grid { grid-template-columns: minmax(0,1fr); } .intro { margin-bottom: 32px; } }

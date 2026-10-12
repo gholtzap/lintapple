@@ -69,6 +69,10 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
         assert.equal(await about.getAttribute('aria-current'), 'page');
         assert.equal(await about.evaluate(el => getComputedStyle(el).fontWeight), '600');
         const copy = page.getByRole('button', { name: 'Copy', exact: true });
+        assert.equal(await copy.locator('svg[aria-hidden="true"]').count(), 1);
+        const codeBox = await page.locator('.command-code').boundingBox();
+        const copyBox = await copy.boundingBox();
+        assert.ok(copyBox.x >= codeBox.x && copyBox.x + copyBox.width <= codeBox.x + codeBox.width && copyBox.y >= codeBox.y && copyBox.y + copyBox.height <= codeBox.y + codeBox.height, 'Copy must stay inside the command block.');
         await copy.click();
         await page.getByRole('status').getByText('Copied', { exact: true }).waitFor();
         assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'npm install -D lintapple && npx lintapple init');
@@ -85,7 +89,10 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
         await page.getByRole('status').getByText('Copied', { exact: true }).waitFor();
         await clean(`Copy keyboard focus, ${theme}, ${viewport.width}px`);
         await copy.hover();
+        await page.getByRole('tooltip', { name: 'Copy', exact: true }).waitFor();
         await clean(`Copy hover, ${theme}, ${viewport.width}px`);
+        await page.keyboard.press('Escape');
+        await page.getByRole('tooltip', { name: 'Copy', exact: true }).waitFor({ state: 'hidden' });
         const gaps = await page.locator('[data-rule="tabular-numbers"]').evaluate(card => {
           const rect = selector => card.querySelector(selector).getBoundingClientRect();
           return [rect('h3').top - rect('iframe').bottom, rect('.card-copy p').top - rect('h3').bottom, rect('.state-controls').top - rect('.card-copy p').bottom];

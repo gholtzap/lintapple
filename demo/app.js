@@ -31,11 +31,15 @@ function gallery() {
     <section class="ui-stack" data-ui-stack>
       <h2>Or run this command</h2>
       <div class="install-command ui-stack" data-ui-stack>
-        ${highlightedCode['npm install -D lintapple && npx lintapple init']}
-        <div class="code-actions ui-actions" data-ui-actions data-ui-container>
-          <span class="copy-status" role="status"></span>
-          <button type="button" data-copy-command>Copy</button>
+        <div class="command-code" data-ui-container>
+          ${highlightedCode['npm install -D lintapple && npx lintapple init']}
+          <button class="icon-button copy-button" type="button" data-copy-command aria-label="Copy" data-ui-tooltip="copy-tooltip" aria-describedby="copy-tooltip">
+            <!-- Copy icon from Tabler Icons (MIT), as used in the reference. -->
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7m0 2.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667z"/><path d="M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1"/></svg>
+          </button>
+          <span class="ui-tooltip" id="copy-tooltip" role="tooltip" hidden>Copy</span>
         </div>
+        <span class="copy-status" role="status"></span>
       </div>
     </section>
   </div>
