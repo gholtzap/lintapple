@@ -38,9 +38,22 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
         else if (state === 'before') assert.ok(report.findings.some(finding => finding.rule === rule.id), `${name} must fail its named rule: ${JSON.stringify(report.findings)}`);
         else assert.deepEqual(report.findings, [], `${name}: ${JSON.stringify(report.findings)}`);
         examples.push({ rule: rule.id, state, theme, viewport, ...report });
+        if (rule.id === 'control-size') {
+          await mkdir(new URL('../test-results/', import.meta.url), { recursive: true });
+          if (state === 'after' && viewport.width >= 390) await page.screenshot({ path: new URL(`../test-results/button-surface-${theme}-${viewport.width}.jpg`, import.meta.url).pathname });
+          const button = page.getByRole('button', { name: 'Remove file' });
+          for (const interaction of ['hover', 'focus']) {
+            if (interaction === 'hover') await button.hover();
+            else await button.focus();
+            const checked = await checkPage(page, policy);
+            assert.deepEqual(checked.findings.map(finding => finding.rule).sort(), report.findings.map(finding => finding.rule).sort(), `${name}, ${interaction}`);
+            examples.push({ rule: rule.id, state, interaction, theme, viewport, ...checked });
+          }
+        }
       }
     }
     await writeFile(new URL(process.env.LINTAPPLE_ORIGIN ? '../test-results/production-matrix.json' : '../demo/reports.json', import.meta.url), `${JSON.stringify({ command: process.env.LINTAPPLE_ORIGIN ? 'Production package and browser verification' : 'npm run demo:check', origin, policy: 'ui-policy.json', examples }, null, 2)}\n`);
+    await writeFile(new URL('../test-results/demo-specimens.json', import.meta.url), JSON.stringify(examples, null, 2));
     for (const viewport of [...defaultPolicy.viewports, { width: 768, height: 900 }]) {
       await page.setViewportSize(viewport);
       await page.goto(`${origin}/demo/`);
