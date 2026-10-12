@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 const { checkPage, defaultPolicy } = await import(process.env.LINTAPPLE_PACKAGE || '../src/index.js');
 import { rules } from '../demo/rules.js';
 import { createDemoServer } from '../demo/server.js';
+const policy = JSON.parse(await readFile(new URL('../ui-policy.json', import.meta.url), 'utf8'));
 
 test('demo examples report expected errors, fixes pass, and all routes and controls work', async () => {
   const server = process.env.LINTAPPLE_ORIGIN ? null : createDemoServer();
@@ -17,10 +18,12 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
   const consoleErrors = [];
   page.on('pageerror', error => consoleErrors.push(error.message));
   const clean = async name => {
-    const report = await checkPage(page);
+    const report = await checkPage(page, policy);
+    shellChecks.push({ name, ...report });
+    await mkdir(new URL('../test-results/', import.meta.url), { recursive: true });
+    await writeFile(new URL('../test-results/demo-ui.json', import.meta.url), JSON.stringify(shellChecks, null, 2));
     assert.deepEqual(report.findings, [], `${name}: ${JSON.stringify(report.findings)}`);
     assert.doesNotMatch(await page.locator('main').innerText(), /\b(?:\d+ findings?|No findings)\b/);
-    shellChecks.push(name);
   };
   try {
     for (const viewport of [{ width: 248, height: 180 }, { width: 330, height: 200 }, ...defaultPolicy.viewports]) {
@@ -54,11 +57,47 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
       assert.deepEqual(await page.locator('[data-rule]').evaluateAll(cards => cards.map(card => card.dataset.rule).sort()), rules.map(rule => rule.id).sort());
       const cardWidths = await page.locator('.rule-card').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().width));
       assert.ok(cardWidths.every(width => Math.abs(width - cardWidths[0]) < 1), 'All example cards must use the same grid width.');
+      assert.equal(await page.locator('.site-header').evaluate(el => getComputedStyle(el).position), 'static');
+      assert.equal((await page.locator('.site-header').boundingBox()).height, 64);
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
       for (const theme of ['dark', 'light']) {
         if (theme === 'light') await page.getByRole('button', { name: 'Use light theme' }).click();
         assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
         for (const src of await page.locator('iframe').evaluateAll(frames => frames.map(frame => frame.getAttribute('src')))) assert.match(src, new RegExp(`theme=${theme}`));
         await clean(`Index before, ${theme}, ${viewport.width}px`);
+        const about = page.locator('.sidebar nav > a');
+        assert.equal(await about.getAttribute('aria-current'), 'page');
+        assert.equal(await about.evaluate(el => getComputedStyle(el).fontWeight), '600');
+        const copy = page.getByRole('button', { name: 'Copy', exact: true });
+        assert.equal(await copy.locator('svg[aria-hidden="true"]').count(), 1);
+        const codeBox = await page.locator('.command-code').boundingBox();
+        const copyBox = await copy.boundingBox();
+        assert.ok(copyBox.x >= codeBox.x && copyBox.x + copyBox.width <= codeBox.x + codeBox.width && copyBox.y >= codeBox.y && copyBox.y + copyBox.height <= codeBox.y + codeBox.height, 'Copy must stay inside the command block.');
+        await copy.click();
+        await page.getByRole('status').getByText('Copied', { exact: true }).waitFor();
+        assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'npm install -D lintapple && npx lintapple init');
+        await clean(`Copy success, ${theme}, ${viewport.width}px`);
+        await page.screenshot({ path: new URL(`../test-results/demo-about-${theme}-${viewport.width}.jpg`, import.meta.url).pathname });
+        await page.evaluate(() => { window.writeText = navigator.clipboard.writeText; navigator.clipboard.writeText = async () => { throw new Error('Clipboard unavailable'); }; });
+        await copy.click();
+        await page.getByRole('status').getByText('Could not copy. Select the command to copy it.', { exact: true }).waitFor();
+        assert.equal(await copy.isEnabled(), true);
+        await clean(`Copy error, ${theme}, ${viewport.width}px`);
+        await page.evaluate(() => { navigator.clipboard.writeText = window.writeText; });
+        await copy.focus();
+        await page.keyboard.press('Enter');
+        await page.getByRole('status').getByText('Copied', { exact: true }).waitFor();
+        await clean(`Copy keyboard focus, ${theme}, ${viewport.width}px`);
+        await copy.hover();
+        await page.getByRole('tooltip', { name: 'Copy', exact: true }).waitFor();
+        await clean(`Copy hover, ${theme}, ${viewport.width}px`);
+        await page.keyboard.press('Escape');
+        await page.getByRole('tooltip', { name: 'Copy', exact: true }).waitFor({ state: 'hidden' });
+        const gaps = await page.locator('[data-rule="tabular-numbers"]').evaluate(card => {
+          const rect = selector => card.querySelector(selector).getBoundingClientRect();
+          return [rect('h3').top - rect('iframe').bottom, rect('.card-copy p').top - rect('h3').bottom, rect('.state-controls').top - rect('.card-copy p').bottom];
+        });
+        assert.deepEqual(gaps, [24, 8, 16]);
         for (const rule of rules) {
           const card = page.locator(`[data-rule="${rule.id}"]`);
           await card.getByRole('button', { name: 'Before', exact: true }).click();
@@ -84,6 +123,9 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
           assert.equal(await page.locator('.report, .report-list, .finding-note, [data-copy]').count(), 0);
           assert.doesNotMatch(await detail.innerText(), /Before check results|Recorded at|Check this example|localhost:4173|Loading check results/);
           assert.equal(await detail.locator('.fix-code').innerText(), rule.fix);
+          assert.ok(await detail.locator('.shiki span[style]').count() > 0, 'Fix code must have syntax colors.');
+          assert.equal(await page.locator('.sidebar nav > a').evaluate(el => getComputedStyle(el).fontWeight), '400');
+          if (rule.id === 'tabular-numbers') await page.screenshot({ path: new URL(`../test-results/demo-detail-${theme}-${viewport.width}.jpg`, import.meta.url).pathname });
           let controlRowHeight;
           for (const state of ['before', 'after']) {
             await detail.getByRole('button', { name: state === 'before' ? 'Before' : 'After', exact: true }).click();
@@ -255,7 +297,7 @@ test('Lenis smooths wheel scrolling, respects motion changes, and resets rule na
       await page.mouse.move(width - 16, 200);
       await page.mouse.wheel(0, 300);
       await page.waitForFunction(() => scrollY > 0 && document.documentElement.classList.contains('lenis-smooth'));
-      await page.locator('.brand').click();
+      await page.locator('.back-link').click();
       await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
       await page.waitForFunction(() => scrollY === 0 && !document.documentElement.classList.contains('lenis-scrolling'));
       assert.deepEqual(await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(scrollY))))), 0);
