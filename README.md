@@ -71,4 +71,4 @@ See [example styles](examples/ui.css).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/gholtzap/lintapple/blob/main/LICENSE).
