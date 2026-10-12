@@ -1,4 +1,5 @@
 import { rules } from './rules.js';
+import { highlightedCode } from './highlighted-code.js';
 import './tooltips.js';
 import Lenis from './vendor/lenis.mjs';
 
@@ -29,7 +30,13 @@ function gallery() {
     </section>
     <section class="ui-stack" data-ui-stack>
       <h2>Or run this command</h2>
-      <pre class="fix-code"><code>npm install -D lintapple &amp;&amp; npx lintapple init</code></pre>
+      <div class="install-command ui-stack" data-ui-stack>
+        ${highlightedCode['npm install -D lintapple && npx lintapple init']}
+        <div class="code-actions ui-actions" data-ui-actions data-ui-container>
+          <span class="copy-status" role="status"></span>
+          <button type="button" data-copy-command>Copy</button>
+        </div>
+      </div>
     </section>
   </div>
   <div class="groups ui-stack" data-ui-stack><h2>Examples</h2>${groups.map(group => `<section class="rule-group ui-stack" data-ui-stack><h2 class="group-heading">${icon(group)}${group}</h2><div class="rule-grid" data-ui-stack>${rules.filter(rule => rule.group === group).map(rule => card(rule)).join('')}</div></section>`).join('')}</div>`;
@@ -39,8 +46,10 @@ function card(rule) {
   const state = states.get(rule.id);
   return `<article class="rule-card" data-rule="${rule.id}">
     ${preview(rule, state)}
-    <div class="card-copy ui-stack" data-ui-stack><h3><a href="#/rule/${rule.id}">${escape(rule.title)}</a></h3><p>${escape(rule.summary)}</p></div>
-    ${stateControls(state)}
+    <div class="card-footer ui-stack" data-ui-stack>
+      <div class="card-copy ui-stack" data-ui-stack><h3><a href="#/rule/${rule.id}">${escape(rule.title)}</a></h3><p>${escape(rule.summary)}</p></div>
+      ${stateControls(state)}
+    </div>
   </article>`;
 }
 
@@ -50,7 +59,7 @@ function detail(rule) {
     <a class="back-link" href="#/">← About</a>
     <div class="detail-intro ui-stack" data-ui-stack><h1>${escape(rule.title)}</h1><p>${escape(rule.summary)}</p></div>
     <section class="comparison ui-stack" data-ui-stack>${preview(rule, state, 'eager')}${stateControls(state)}</section>
-    <section class="ui-stack" data-ui-stack><h2>The fix</h2><pre class="fix-code"><code>${escape(rule.fix)}</code></pre></section>
+    <section class="ui-stack" data-ui-stack><h2>The fix</h2>${highlightedCode[rule.fix]}</section>
   </article>`;
 }
 
@@ -76,11 +85,22 @@ function setPreviewState(example, state) {
   example.querySelectorAll('[data-state]').forEach(control => control.setAttribute('aria-pressed', String(control.dataset.state === state)));
 }
 
-main.addEventListener('click', event => {
+main.addEventListener('click', async event => {
   const button = event.target.closest('button');
   if (!button) return;
   if (button.dataset.state) {
     setPreviewState(button.closest('[data-rule]'), button.dataset.state);
+  } else if (button.hasAttribute('data-copy-command')) {
+    const block = button.closest('.install-command');
+    button.disabled = true;
+    try {
+      await navigator.clipboard.writeText(block.querySelector('code').textContent);
+      block.querySelector('[role="status"]').textContent = 'Copied';
+    } catch {
+      block.querySelector('[role="status"]').textContent = 'Could not copy. Select the command to copy it.';
+    } finally {
+      button.disabled = false;
+    }
   }
 });
 themeButton.addEventListener('click', () => {

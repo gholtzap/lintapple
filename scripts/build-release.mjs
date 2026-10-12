@@ -7,6 +7,7 @@ const root = resolve(new URL('../', import.meta.url).pathname);
 const stage = resolve(process.argv[2] || join(root, 'test-results/production-stage'));
 if (stage === root) throw new Error('Use a separate directory for the release.');
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+execFileSync(process.execPath, [join(root, 'scripts/highlight-demo.mjs')], { cwd: root });
 await mkdir(join(stage, 'downloads'), { recursive: true });
 await rm(join(stage, 'demo'), { recursive: true, force: true });
 await cp(join(root, 'demo'), join(stage, 'demo'), { recursive: true });
