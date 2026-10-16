@@ -50,7 +50,7 @@ export async function svgTextContrast(page) {
             text.el.style.setProperty('fill-opacity', '1', 'important');
           }
         }, paint);
-        images.push((await page.screenshot({ clip: info.clip })).toString('base64'));
+        images.push((await page.screenshot({ clip: info.clip, fullPage: true })).toString('base64'));
       }
       const measured = await snapshot.evaluate(async (value, images) => {
         const rasters = [];
