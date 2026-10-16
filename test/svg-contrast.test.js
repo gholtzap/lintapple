@@ -33,3 +33,19 @@ test('SVG contrast checks rendered backgrounds without changing the page', async
     await writeFile('test-results/svg-contrast.json', JSON.stringify({ passed: true, results }, null, 2));
   } finally { await browser.close(); }
 });
+
+test('SVG text below the viewport is measured without changing scroll or viewport state', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    for (const color of ['#111', '#aaa']) {
+      await page.setContent(`<html><style>html{font:14px system-ui;background:white;color:black}body{margin:24px}</style><body><div style="height:1200px"></div><svg width="300" height="100"><rect width="300" height="100" fill="white"/><text x="20" y="50" style="fill:${color};font:14px system-ui">Chart label</text></svg></body></html>`);
+      const report = await checkPage(page);
+      const findings = report.findings.filter(row => row.rule === 'text-contrast');
+      if (color === '#111') assert.deepEqual(findings, []);
+      else assert.ok(findings.some(row => row.status === 'failed'));
+      assert.equal(await page.evaluate(() => scrollY), 0);
+      assert.deepEqual(page.viewportSize(), { width: 390, height: 844 });
+    }
+  } finally { await browser.close(); }
+});
