@@ -1,6 +1,6 @@
 {
   "name": "lintapple",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Check rendered interfaces against explicit design rules.",
   "license": "MIT",
   "type": "module",

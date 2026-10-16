@@ -1,5 +1,5 @@
 // Runs in the browser. Use one report shape for all design rules.
-export async function audit({ policy, contrast, accessibility, format, visibility }) {
+export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }) {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   const findings = [];
@@ -298,10 +298,17 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     for (const result of results) for (const node of result.nodes) {
       const el = node.element;
       if (!inScope.has(el) || !visible(el)) continue;
+      if (svgContrast.some(result => document.querySelector(result.selector) === el)) continue;
       const check = [...node.any, ...node.all, ...node.none].find(check => check.id === 'color-contrast');
       const data = check?.data ?? {};
       reportContrast(el, status, data, check?.message ?? node.failureSummary);
     }
+  }
+  for (const result of svgContrast) {
+    if (result.status === 'passed') continue;
+    const el = document.querySelector(result.selector);
+    if (!el || !inScope.has(el)) continue;
+    reportContrast(el, result.status, { expectedContrastRatio: `${result.required}:1`, contrastRatio: result.contrastRatio, fgColor: result.fgColor, bgColor: result.bgColor }, result.reason);
   }
   // axe checks input text color, not the separately styled placeholder.
   // Use its color and background primitives without changing form values.
