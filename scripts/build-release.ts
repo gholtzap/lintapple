@@ -1,12 +1,17 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = resolve(new URL('../../', import.meta.url).pathname);
+const root = await realpath(fileURLToPath(new URL('../../', import.meta.url)));
 const output = join(root, 'dist');
 const stage = resolve(process.argv[2] || join(root, 'test-results/production-stage'));
-if (stage === root) throw new Error('Use a separate directory for the release.');
+const existingStage = await realpath(stage).catch((error: NodeJS.ErrnoException) => {
+  if (error.code !== 'ENOENT') throw error;
+  return undefined;
+});
+if (existingStage === root) throw new Error('Use a separate directory for the release.');
 const pkg: { version: string } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 execFileSync(process.execPath, [join(output, 'scripts/highlight-demo.js')], { cwd: root });
 await mkdir(join(stage, 'downloads'), { recursive: true });

@@ -50,3 +50,20 @@ test('SVG text below the viewport is measured without changing scroll or viewpor
     }
   } finally { await browser.close(); }
 });
+
+test('SVG checks in a frame keep the existing unresolved report and restore the document', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<iframe title="Chart"></iframe>');
+    const frame = page.frames()[1];
+    await frame.setContent('<html lang="en"><style>html{background:white;color:black;font:16px system-ui}</style><body><svg width="240" height="80"><text x="4" y="32" style="font:16px system-ui;fill:#aaa">Chart label</text></svg></body></html>');
+    const before = await frame.content();
+    const report = await checkPage(frame);
+    const finding = report.findings.find(item => item.rule === 'text-contrast');
+    assert.ok(finding);
+    assert.equal(finding.status, 'unresolved');
+    assert.equal(finding.actual, 'contrast could not be measured: page.screenshot is not a function');
+    assert.equal(await frame.content(), before);
+  } finally { await browser.close(); }
+});

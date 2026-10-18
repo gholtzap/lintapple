@@ -43,7 +43,8 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
       const info = await snapshot.evaluate(value => ({ clip: value.clip, count: value.texts.length }));
       if (!info.count) continue;
       if (info.clip.width * info.clip.height > 4_000_000 || !info.clip.width || !info.clip.height) throw new Error('SVG capture size needs review');
-      if (!('screenshot' in page)) throw new Error('SVG text in a frame needs review.');
+      // Keep the existing report text for frames, which have no screenshot API.
+      if (!('screenshot' in page)) throw new TypeError('page.screenshot is not a function');
       const images: string[] = [];
       for (const paint of ['hidden', 'black', 'white', 'hidden']) {
         await snapshot.evaluate((value, paint) => {
