@@ -40,7 +40,7 @@ For a page that loads asynchronously, add `--ready '[data-app-ready]'` with a se
 
 Add this to an existing test after the page is ready:
 
-```js
+```ts
 import { expectUI } from 'lintapple/playwright';
 
 await expectUI(page, testInfo);
@@ -68,6 +68,21 @@ Add these attributes for checks that need layout information:
 
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
+
+## Development
+
+All source, tests, examples, and build scripts use strict TypeScript. Run `npm ci`, then:
+
+```sh
+npm run typecheck
+npm test
+npm run test:playwright
+npm run demo
+```
+
+`npm run build` writes JavaScript, source maps, type declarations, and demo assets to `dist/`.
+The package exports built JavaScript and generated types for `lintapple` and `lintapple/playwright`.
+Node.js users do not need a TypeScript loader. Run `npm run release:build` to prepare the demo and package for release.
 
 ## License
 
