@@ -300,7 +300,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const [status, results] of [['failed', contrastResult.violations], ['unresolved', contrastResult.incomplete]] as const) {
     for (const result of results) for (const node of result.nodes) {
       const el = node.element;
-      if (!inScope.has(el) || !visible(el)) continue;
+      if (!inScope.has(el) || !visible(el) || el.closest('button:disabled, [aria-disabled="true"]')) continue;
       if (svgContrast.some(result => document.querySelector(result.selector) === el)) continue;
       const check = [...node.any, ...node.all, ...node.none].find(check => check.id === 'color-contrast');
       const data = check?.data ?? {};
