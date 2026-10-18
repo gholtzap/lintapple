@@ -35,17 +35,23 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     if (!sizes.some(allowed => Math.abs(size - allowed) < 0.1))
       add('font-size', el, `${size}px`, `one of ${sizes.join(', ')}px`, 'Use a configured size for this text role.', undefined, { selector: `${selector(el)}${pseudo}` });
   };
+  const checkFont = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
+    const family = style.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+    if (!policy.fonts.some(font => font.toLowerCase() === family.toLowerCase()))
+      add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.', undefined, { selector: `${selector(el)}${pseudo}` });
+    checkFontSize(el, style, pseudo);
+  };
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el)!;
-    if (isText(el) && !el.closest('pre, code, kbd, samp')) {
-      const family = style.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '');
-      if (!policy.fonts.some(font => font.toLowerCase() === family.toLowerCase()))
-        add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.');
-      checkFontSize(el, style);
-    }
+    if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
     if (!el.closest('pre, code, kbd, samp'))
       for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFontSize(el, textStyle, pseudo);
+    if (!el.closest('pre, code, kbd, samp') && el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) {
+      const placeholder = getComputedStyle(el, '::placeholder');
+      if (placeholder.display !== 'none' && placeholder.visibility === 'visible' && parseFloat(placeholder.opacity) > 0 && parseFloat(placeholder.fontSize) > 0)
+        checkFont(el, placeholder, '::placeholder');
+    }
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
