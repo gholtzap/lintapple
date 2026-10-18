@@ -123,7 +123,7 @@ export interface AxeEngine {
   configure(options: { checks: { id: string; options: { ignoreUnicode: boolean; ignoreLength: boolean; ignorePseudo: boolean; boldValue: number; boldTextPt: number; largeTextPt: number; contrastRatio: { normal: { expected: number }; large: { expected: number } }; pseudoSizeThreshold: number; shadowOutlineEmMax: number; textStrokeEmMin: number } }[] }): void;
   setup(document: Document): void;
   teardown(): void;
-  commons: { dom: { isVisibleOnScreen(el: Element): boolean }; text: { visible(el: Element): string }; color: { Color: new () => Color; getBackgroundColor(el: Element): Color | null; flattenColors(fg: Color, bg: Color): Color; getContrast(bg: Color, fg: Color): number } };
+  commons: { dom: { isVisibleOnScreen(el: Element): boolean }; text: { visible(el: Element): string; accessibleText(el: Element, context?: { inLabelledByContext?: boolean }): string }; color: { Color: new () => Color; getBackgroundColor(el: Element): Color | null; flattenColors(fg: Color, bg: Color): Color; getContrast(bg: Color, fg: Color): number } };
 }
 export interface AccessibilityInput { elements: Element[]; controls: Element[]; visible: Visibility['visible']; hasVisibleContent: Visibility['hasVisibleContent']; add: AddFinding; engine: AxeEngine }
 export interface AuditInput { policy: Policy; contrast: AxeEngine; accessibility: typeof auditAccessibility; format: typeof finding; visibility: Visibility; svgContrast?: SvgContrast[] }
