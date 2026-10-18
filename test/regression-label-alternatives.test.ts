@@ -12,11 +12,14 @@ const image = '<img alt="Name" width="64" height="24" src="data:image/svg+xml,%3
 test('URL checks accept image labels and reject fields without a programmatic label', async () => {
   const cases: Record<string, { body: string; rules: RuleId[]; policy?: Partial<Policy> }> = {
     image: { body: `<label for="name">${image}</label><input id="name">`, rules: [] },
+    wrappedImage: { body: `<label><span>${image}<input></span></label>`, rules: [] },
     referenced: { body: `<span id="label">${image}</span><input aria-labelledby="label">`, rules: [] },
     hiddenReference: { body: '<span hidden id="label">Name</span><input aria-labelledby="label">', rules: [] },
     text: { body: '<label for="name">Name</label><input id="name">', rules: [] },
     placeholder: { body: '<input placeholder="Name">', rules: ['form-label'] },
     emptyLabel: { body: '<label for="name"></label><input id="name" placeholder="Name">', rules: ['form-label'] },
+    emptyWrappedLabel: { body: '<label><span><input placeholder="Name"></span></label>', rules: ['form-label'] },
+    wrappedValue: { body: '<label><input value="Project"></label>', rules: ['form-label'] },
     title: { body: '<input title="Name">', rules: ['form-label'] },
   };
   await mkdir('test-results', { recursive: true });
