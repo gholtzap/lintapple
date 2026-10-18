@@ -31,7 +31,8 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
         context.clearRect(0, 0, 1, 1); context.fillStyle = style.fill; context.fillRect(0, 0, 1, 1);
         const rgba = [...context.getImageData(0, 0, 1, 1).data];
         const alpha = rgba[3] / 255 * parseFloat(style.fillOpacity);
-        return { el, selector: selector(el), originalStyle: el.getAttribute('style'), reason,
+        const declarations = Array.from(el.style, property => ({ property, value: el.style.getPropertyValue(property), priority: el.style.getPropertyPriority(property) }));
+        return { el, selector: selector(el), originalStyle: el.getAttribute('style'), declarations, painted: false, reason,
           rgba: [...rgba.slice(0, 3), alpha], rect: { x: bounds.x + scrollX, y: bounds.y + scrollY, width: bounds.width, height: bounds.height },
           required: parseFloat(style.fontSize) >= 24 || parseFloat(style.fontSize) >= 56 / 3 && parseFloat(style.fontWeight) >= 700 ? 3 : 4.5 };
       });
@@ -49,6 +50,7 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
       for (const paint of ['hidden', 'black', 'white', 'hidden']) {
         await snapshot.evaluate((value, paint) => {
           for (const text of value.texts) if (!text.reason) {
+            text.painted = true;
             text.el.style.setProperty('opacity', paint === 'hidden' ? '0' : '1', 'important');
             text.el.style.setProperty('fill', paint === 'black' ? '#000' : '#fff', 'important');
             text.el.style.setProperty('fill-opacity', '1', 'important');
@@ -95,7 +97,16 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
       results.push(...await snapshot.evaluate((value, reason) => value.texts.map(text => ({ selector: text.selector, required: text.required, status: 'unresolved' as const, reason })), error instanceof Error ? error.message : String(error)));
     } finally {
       await snapshot.evaluate(value => { for (const text of value.texts) {
-        if (text.originalStyle === null) text.el.removeAttribute('style'); else text.el.setAttribute('style', text.originalStyle);
+        if (!text.painted) continue;
+        for (const property of ['opacity', 'fill', 'fill-opacity']) {
+          const original = text.declarations.find(declaration => declaration.property === property);
+          if (original) text.el.style.setProperty(property, original.value, original.priority);
+          else text.el.style.removeProperty(property);
+        }
+        // Keep exact markup when the application has not changed other declarations.
+        if (text.el.style.length === text.declarations.length && text.declarations.every(({ property, value, priority }) => text.el.style.getPropertyValue(property) === value && text.el.style.getPropertyPriority(property) === priority)) {
+          if (text.originalStyle === null) text.el.removeAttribute('style'); else text.el.setAttribute('style', text.originalStyle);
+        }
       } });
       await snapshot.dispose(); await svg.dispose();
     }
