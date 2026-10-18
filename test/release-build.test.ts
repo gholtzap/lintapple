@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,7 +34,7 @@ test('a checkout with spaces builds a complete release with verified package and
     for (const path of ['demo/index.html', 'demo/app.js', 'demo/specimen.js', 'demo/vendor/lenis.mjs', 'examples/ui.css', release.package])
       assert.ok(release.hashes[path], `The release must include ${path}.`);
     await assert.rejects(readFile(join(stage, 'demo/app.ts')), { code: 'ENOENT' });
-    await execute(process.execPath, ['--check', join(stage, 'demo/app.js')]);
+    execFileSync(process.execPath, ['--input-type=module', '--check'], { input: await readFile(join(stage, 'demo/app.js')) });
     await assert.rejects(execute(process.execPath, [join(checkout, 'dist/scripts/build-release.js'), checkout], { cwd: checkout, env }), /Use a separate directory/);
     const alias = join(directory, 'source alias');
     await symlink(checkout, alias, 'junction');
