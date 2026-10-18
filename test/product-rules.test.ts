@@ -51,7 +51,7 @@ test('packaged product checks alignment, clipping, names, labels, references, an
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const packed: {filename: string; integrity: string} = JSON.parse((await run('npm', ['pack', '--json', '--pack-destination', directory])).stdout)[0];
+    const packed: {filename: string; integrity: string} = JSON.parse((await run('npm', ['pack', '--silent', '--json', '--pack-destination', directory])).stdout)[0];
     await run('tar', ['-xzf', join(directory, packed.filename), '-C', directory]);
     const product = await import(pathToFileURL(join(directory, 'package/dist/src/index.js')).href) as typeof import('../src/index.js');
     for (const rule of Object.keys(cases)) assert.ok(product.ruleIds.some(id => id === rule), `Missing product rule: ${rule}`);

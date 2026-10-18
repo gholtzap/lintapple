@@ -23,7 +23,7 @@ await cp(join(root, 'node_modules/lenis/LICENSE'), join(stage, 'demo/vendor/leni
 await mkdir(join(stage, 'examples'), { recursive: true });
 await cp(join(root, 'examples/ui.css'), join(stage, 'examples/ui.css'));
 await cp(join(root, 'README.md'), join(stage, 'README.md'));
-const packages: { filename: string; integrity: string }[] = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', join(stage, 'downloads')], { cwd: root, encoding: 'utf8' }));
+const packages: { filename: string; integrity: string }[] = JSON.parse(execFileSync('npm', ['pack', '--silent', '--json', '--pack-destination', join(stage, 'downloads')], { cwd: root, encoding: 'utf8' }));
 const packed = packages[0];
 const hashes: Record<string, string> = {};
 const scan = async (directory: string): Promise<void> => {

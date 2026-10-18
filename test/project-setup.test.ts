@@ -20,7 +20,7 @@ test('an existing project installs the package, keeps its files, and uses one po
     catch (error) { assertProcessError(error); assert.equal(error.code, 2, error.stderr); return error; }
   };
   try {
-    const packed: {filename: string; integrity: string} = JSON.parse((await run('npm', ['pack', '--json', '--pack-destination', root])).stdout)[0];
+    const packed: {filename: string; integrity: string} = JSON.parse((await run('npm', ['pack', '--silent', '--json', '--pack-destination', root])).stdout)[0];
     const original = { name: 'existing-project', private: true, type: 'module', scripts: { dev: 'node app.js', test: 'playwright test' } };
     await writeFile(join(root, 'package.json'), JSON.stringify(original));
     await run('npm', ['install', '--no-audit', '--no-fund', join(root, packed.filename)], { cwd: root });
