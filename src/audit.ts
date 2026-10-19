@@ -51,7 +51,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = styles.get(el)!;
     if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
     if (!el.closest('pre, code, kbd, samp'))
-      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFontSize(el, textStyle, pseudo);
+      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
     const placeholder = placeholderStyle(el);
     if (placeholder && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
@@ -220,9 +220,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       // Overflow below an absolute box's containing block cannot clip that box.
       if (containingBlock && node !== containingBlock) continue;
       ancestors.push(node);
-      // A viewport-fixed box escapes ordinary ancestor scrolling and clipping.
-      if (styleOf(node).position === 'fixed') break;
-      containingBlock = styleOf(node).position === 'absolute' ? (node as HTMLElement).offsetParent ?? document.documentElement : null;
+      const position: string = styleOf(node).position;
+      const offsetParent: Element | null = (node as HTMLElement).offsetParent;
+      // Only a viewport-fixed box escapes all ancestor clips.
+      if (position === 'fixed' && !offsetParent) break;
+      containingBlock = ['absolute', 'fixed'].includes(position) ? offsetParent ?? document.documentElement : null;
     }
     const clips = ancestors.filter(node => node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => ({
       element: node,
