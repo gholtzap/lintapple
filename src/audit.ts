@@ -125,8 +125,10 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   };
   for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
+  const layoutChildren = (el: Element): Element[] => [...el.children].flatMap(child =>
+    getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
   for (const el of [...document.querySelectorAll('[data-ui-stack]')].filter(hasVisibleContent))
-    checkGap([...el.children].filter(visible), 'layout-gap', policy.minLayoutGap);
+    checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
   let alignmentGroups = 0;
   for (const group of [...document.querySelectorAll('[data-ui-align]')].filter(hasVisibleContent)) {
     const alignment = group.getAttribute('data-ui-align');
