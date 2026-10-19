@@ -221,3 +221,15 @@ test('demo tooltips work on hover, keyboard focus, and Escape in both themes', a
     });
   } finally { await new Promise<void>((resolve, reject: (reason?: unknown) => void) => server.close(error => error ? reject(error) : resolve())); }
 });
+
+test('tooltip text uses its own text role without weakening button size checks', async () => withPage(async page => {
+  await page.setContent(shell(`<button id="trigger" aria-describedby="tip" style="font-size:12px">Save<span id="tip" role="tooltip" style="display:block;font-size:12px"><span>Save changes</span></span></button>`));
+  const result = await checkPage(page);
+  const sizes = result.findings.filter(f => f.rule === 'font-size');
+  assert.equal(sizes.length, 1, JSON.stringify(sizes));
+  assert.ok(!sizes[0].selector.includes('span'));
+  const custom = await checkPage(page, { typeRules: [{ selector: '[role="tooltip"]', sizes: [14] }, { selector: 'button', sizes: [14, 16] }] });
+  assert.ok(custom.findings.some(f => f.rule === 'font-size' && f.selector.includes('span')), 'Explicit tooltip sizes still apply.');
+  await page.locator('#tip').evaluate(el => el.style.fontSize = '11px');
+  assert.ok((await checkPage(page)).findings.some(f => f.rule === 'font-size' && f.selector.includes('span')), 'Tooltip text must still meet the policy.');
+}));

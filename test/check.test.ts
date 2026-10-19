@@ -106,6 +106,15 @@ test('CLI checks real pages, reports stable failures, and rejects invalid input'
     const expected = ['font-family', 'font-size', 'control-size', 'control-gap', 'layout-gap', 'tabular-numbers', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'text-contrast', 'copy'];
     assert.deepEqual([...new Set(report.findings.map(f => f.rule))].sort(), expected.sort());
     assert.ok(report.findings.every(f => f.selector && f.message && f.fix && f.viewport));
+    assert.equal(report.summary.occurrences, report.findings.length);
+    assert.ok(report.summary.problems < report.summary.occurrences);
+    const text = await cli([`${url}/bad`]);
+    assert.equal(text.code, 1);
+    assert.match(text.stdout, /distinct problems/);
+    assert.match(text.stdout, /unresolved/);
+    assert.match(text.stdout, /Frame coverage:/);
+    assert.equal(text.stdout.match(/Fix:/g)?.length, report.summary.problems);
+    assert.match(text.stderr, /Policy:.*Approved fonts:/);
     const repeated: UrlReport = JSON.parse((await cli([`${url}/bad`, '--json'])).stdout);
     assert.deepEqual(repeated, report);
     const edgeReport: UrlReport = JSON.parse((await cli([`${url}/edge`, '--json'])).stdout);
