@@ -27,7 +27,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
-  const controls = elements.filter(el => el.matches('button, [role="button"], input[type="button"], input[type="submit"], input[type="reset"]'));
+  const controls = elements.filter(el => el.matches('button, [role="button"], input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]'));
   const isText = (el: Element) => [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) || el.matches('input, textarea, select');
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
@@ -35,17 +35,23 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     if (!sizes.some(allowed => Math.abs(size - allowed) < 0.1))
       add('font-size', el, `${size}px`, `one of ${sizes.join(', ')}px`, 'Use a configured size for this text role.', undefined, { selector: `${selector(el)}${pseudo}` });
   };
+  const checkFont = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
+    const family = style.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+    if (!policy.fonts.some(font => font.toLowerCase() === family.toLowerCase()))
+      add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.', undefined, { selector: `${selector(el)}${pseudo}` });
+    checkFontSize(el, style, pseudo);
+  };
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el)!;
-    if (isText(el) && !el.closest('pre, code, kbd, samp')) {
-      const family = style.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '');
-      if (!policy.fonts.some(font => font.toLowerCase() === family.toLowerCase()))
-        add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.');
-      checkFontSize(el, style);
-    }
+    if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
     if (!el.closest('pre, code, kbd, samp'))
       for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFontSize(el, textStyle, pseudo);
+    if (!el.closest('pre, code, kbd, samp') && el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) {
+      const placeholder = getComputedStyle(el, '::placeholder');
+      if (placeholder.display !== 'none' && placeholder.visibility === 'visible' && parseFloat(placeholder.opacity) > 0 && parseFloat(placeholder.fontSize) > 0)
+        checkFont(el, placeholder, '::placeholder');
+    }
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
@@ -301,6 +307,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     for (const result of results) for (const node of result.nodes) {
       const el = node.element;
       if (!inScope.has(el) || !visible(el) || el.closest('button:disabled, [aria-disabled="true"]')) continue;
+      if (el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) continue;
       if (svgContrast.some(result => document.querySelector(result.selector) === el)) continue;
       const check = [...node.any, ...node.all, ...node.none].find(check => check.id === 'color-contrast');
       const data = check?.data ?? {};
@@ -375,7 +382,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       try {
         const background = contrast.commons.color.getBackgroundColor(el);
         if (!background) { reportContrast(el, 'unresolved', data, 'placeholder background needs review'); continue; }
-        const foreground = new contrast.commons.color.Color().parseString(style.color);
+        const foreground = new contrast.commons.color.Color().parseString(style.webkitTextFillColor || style.color);
         foreground.alpha *= parseFloat(style.opacity);
         const blended = contrast.commons.color.flattenColors(foreground, background);
         const ratio = contrast.commons.color.getContrast(background, blended);
