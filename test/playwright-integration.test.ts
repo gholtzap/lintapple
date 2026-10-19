@@ -14,7 +14,7 @@ test('packed assertion uses Playwright HTML attachments and GitHub error annotat
   await mkdir('test-results', { recursive: true });
   const directory = await mkdtemp(resolve('test-results/playwright-integration-'));
   try {
-    const packed: {filename: string; integrity: string} = JSON.parse((await run('npm', ['pack', '--silent', '--json', '--pack-destination', directory])).stdout)[0];
+    const packed: {filename: string; integrity: string} = JSON.parse((await run('npm', ['pack', '--ignore-scripts', '--silent', '--json', '--pack-destination', directory])).stdout)[0];
     await run('tar', ['-xzf', join(directory, packed.filename), '-C', directory]);
     const root = join(directory, 'package');
     await writeFile(join(root, 'checks.spec.js'), `

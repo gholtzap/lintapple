@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, stat } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -51,7 +51,10 @@ test('packaged product checks alignment, clipping, names, labels, references, an
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const packed: {filename: string; integrity: string} = JSON.parse((await run('npm', ['pack', '--silent', '--json', '--pack-destination', directory])).stdout)[0];
+    // npm test builds once; package checks must not rewrite parallel CLI inputs.
+    const buildTime = (await stat(resolve('dist/src/widgets.js'))).mtimeMs;
+    const packed: {filename: string; integrity: string} = JSON.parse((await run('npm', ['pack', '--ignore-scripts', '--silent', '--json', '--pack-destination', directory])).stdout)[0];
+    assert.equal((await stat(resolve('dist/src/widgets.js'))).mtimeMs, buildTime, 'Packing must keep the build used by parallel CLI tests unchanged.');
     await run('tar', ['-xzf', join(directory, packed.filename), '-C', directory]);
     const product = await import(pathToFileURL(join(directory, 'package/dist/src/index.js')).href) as typeof import('../src/index.js');
     for (const rule of Object.keys(cases)) assert.ok(product.ruleIds.some(id => id === rule), `Missing product rule: ${rule}`);
