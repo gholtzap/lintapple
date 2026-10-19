@@ -15,7 +15,7 @@ export function createVisibility() {
     const literal = style.content.match(/^"((?:[^"\\]|\\.)*)"/)?.[1];
     const text = literal?.replace(/\\([\da-f]{1,6})\s?|\\(.)/gi, (_: string, hex: string | undefined, escaped: string) => hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : escaped);
     if (!text?.trim() || style.display === 'none' || style.visibility !== 'visible' || (style.display !== 'contents' && parseFloat(style.opacity) === 0) || parseFloat(style.fontSize) === 0) return [];
-    return [{ pseudo, style }];
+    return [{ pseudo, style, text }];
   });
   const visible = (el: Element | null | undefined): boolean => {
     if (!el?.isConnected || el.closest('[inert]')) return false;

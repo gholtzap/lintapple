@@ -67,14 +67,21 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     if (copyText.has(el)) return copyText.get(el)!;
     if (el.matches('pre, code, kbd, samp')) return '\0';
     if (!hasVisibleContent(el)) return '';
-    const text = (el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? (el as HTMLInputElement).value : [...el.childNodes].map(node => {
+    const generated = generatedTextStyles(el);
+    const generatedText = (pseudo: string) => {
+      const item = generated.find(item => item.pseudo === pseudo);
+      if (!item) return '';
+      return item.style.display.startsWith('inline') || item.style.display === 'contents' ? item.text : `\n${item.text}\n`;
+    };
+    const content = (el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? (el as HTMLInputElement).value : [...el.childNodes].map(node => {
       if (node.nodeType === Node.TEXT_NODE) return visible(el) ? node.textContent : '';
       if (node.nodeType !== Node.ELEMENT_NODE) return '';
       if ((node as Element).tagName === 'BR') return '\n';
       const content = textOf(node as Element);
       const display = getComputedStyle(node as Element).display;
       return display.startsWith('inline') || display === 'contents' ? content : `\n${content}\n`;
-    }).join('')).replace(/\s+/g, ' ').toLowerCase();
+    }).join(''));
+    const text = (generatedText('::before') + content + generatedText('::after')).replace(/\s+/g, ' ').toLowerCase();
     copyText.set(el, text);
     return text;
   };
