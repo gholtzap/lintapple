@@ -22,7 +22,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
   const suppressed: SuppressedFinding[] = [];
-  const { textRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
+  const { textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const elements = [...document.querySelectorAll('body, body *')].filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
@@ -269,7 +269,10 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
     const context = contextFor(el);
-    const rects = textRects(el);
+    const generated = generatedTextRects(el);
+    if (generated === null && context.clips.length)
+      add('content-clipping', el, 'generated text geometry could not be measured', 'text lines inside the clipping area', 'Review the generated text and its clipping area.', undefined, { status: 'unresolved' });
+    const rects = [...textRects(el), ...(generated ?? [])];
     const escaped = new Map<string, number>();
     for (const [rect, scrollX, scrollY, isTextRect] of ([[el.getBoundingClientRect(), context.boxScrollX, context.boxScrollY, false], ...rects.map(rect => [rect, context.textScrollX, context.textScrollY, true])] as [DOMRect, boolean, boolean, boolean][])) {
       const painted = clippedRect(rect, context.clips, el, isTextRect);

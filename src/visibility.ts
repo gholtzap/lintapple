@@ -23,6 +23,36 @@ export function createVisibility() {
     if ((!text.trim() && !counter) || style.display === 'none' || style.visibility !== 'visible' || (style.display !== 'contents' && parseFloat(style.opacity) === 0) || parseFloat(style.fontSize) === 0) return [];
     return [{ pseudo, style, text }];
   });
+  const generatedTextRects = (el: Element) => {
+    let unresolved = false;
+    const rects = generatedTextStyles(el).flatMap(({ pseudo, style, text }) => {
+      // shortcut: Counter text needs review inside clips; add browser text geometry to measure it.
+      if (!text || text.includes('\0')) { unresolved = true; return []; }
+      const span = document.createElement('span');
+      for (const property of style) span.style.setProperty(property, style.getPropertyValue(property), 'important');
+      span.style.setProperty('content', 'normal', 'important');
+      span.textContent = text;
+      const attribute = 'data-lintapple-measure';
+      const previous = el.getAttribute(attribute);
+      const token = Math.random().toString(36).slice(2);
+      const sheets = [...document.adoptedStyleSheets];
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(`[${attribute}="${token}"]${pseudo}{content:none!important}[${attribute}="${token}-text"]::before,[${attribute}="${token}-text"]::after{content:none!important}`);
+      span.setAttribute(attribute, `${token}-text`);
+      try {
+        el.setAttribute(attribute, token);
+        document.adoptedStyleSheets = [...sheets, sheet];
+        if (getComputedStyle(el, pseudo).content !== 'none') { unresolved = true; return []; }
+        el.insertBefore(span, pseudo === '::before' ? el.firstChild : null);
+        return textRects(span);
+      } finally {
+        span.remove();
+        document.adoptedStyleSheets = sheets;
+        if (previous === null) el.removeAttribute(attribute); else el.setAttribute(attribute, previous);
+      }
+    });
+    return unresolved ? null : rects;
+  };
   const visible = (el: Element | null | undefined): boolean => {
     if (!el?.isConnected || el.closest('[inert]')) return false;
     const bounds = el.getBoundingClientRect();
@@ -40,5 +70,5 @@ export function createVisibility() {
     return true;
   };
   const hasVisibleContent = (el: Element | null | undefined): boolean => !!el?.isConnected && (visible(el) || [...el.querySelectorAll('*')].some(visible));
-  return { textRects, visible, hasVisibleContent, generatedTextStyles };
+  return { textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles };
 }
