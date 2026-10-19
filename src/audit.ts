@@ -158,27 +158,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     right: outer.right - inner.right,
     bottom: outer.bottom - inner.bottom,
   });
-  const scaleFor = (container: Element) => {
-    const bounds = container.getBoundingClientRect();
-    const style = styles.get(container) ?? getComputedStyle(container);
-    const length = (axis: 'width' | 'height') => {
-      const edges: (keyof CSSStyleDeclaration)[] = axis === 'width' ? ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] : ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'];
-      return parseFloat(style[axis]) + (style.boxSizing === 'border-box' ? 0 : edges.reduce<number>((sum, key) => sum + parseFloat(String(style[key])), 0));
-    };
-    return { x: bounds.width / (length('width') || (container as HTMLElement).offsetWidth), y: bounds.height / (length('height') || (container as HTMLElement).offsetHeight) };
-  };
-  // One client-box primitive for control insets and text clipping.
-  const clientBounds = (container: Element) => {
-    const bounds = container.getBoundingClientRect();
-    // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
-    const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
-    const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : container instanceof SVGSVGElement ? scaleFor(container).y : 1;
-    const style = getComputedStyle(container);
-    const inline = container instanceof HTMLElement && style.display === 'inline';
-    const clientLeft = inline ? parseFloat(style.borderLeftWidth) : container.clientLeft;
-    const clientTop = inline ? parseFloat(style.borderTopWidth) : container.clientTop;
-    const clientWidth = inline ? bounds.width / scaleX - clientLeft - parseFloat(style.borderRightWidth) : container.clientWidth;
-    const clientHeight = inline ? bounds.height / scaleY - clientTop - parseFloat(style.borderBottomWidth) : container.clientHeight;
+  const transformFor = (container: Element) => {
     let transform = new DOMMatrix();
     for (let node: Element | null = container; node; node = node.parentElement) {
       const style = getComputedStyle(node);
@@ -186,6 +166,43 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const [x, y = x] = style.scale === 'none' ? [1, 1] : style.scale.split(/\s+/).map(Number);
       transform = matrix.scale(x, y).multiply(transform);
     }
+    return transform;
+  };
+  const scaleFor = (container: Element) => {
+    const bounds = container.getBoundingClientRect();
+    const style = styles.get(container) ?? getComputedStyle(container);
+    const length = (axis: 'width' | 'height') => {
+      const edges: (keyof CSSStyleDeclaration)[] = axis === 'width' ? ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] : ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'];
+      return parseFloat(style[axis]) + (style.boxSizing === 'border-box' ? 0 : edges.reduce<number>((sum, key) => sum + parseFloat(String(style[key])), 0));
+    };
+    const width = length('width') || (container as HTMLElement).offsetWidth;
+    const height = length('height') || (container as HTMLElement).offsetHeight;
+    const transform = transformFor(container);
+    return { x: width ? bounds.width / width : Math.hypot(transform.a, transform.b), y: height ? bounds.height / height : Math.hypot(transform.c, transform.d) };
+  };
+  // One client-box primitive for control insets and text clipping.
+  const clientBounds = (container: Element, box: 'padding-box' | 'content-box' | 'border-box' = 'padding-box') => {
+    const bounds = container.getBoundingClientRect();
+    // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
+    const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
+    const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : container instanceof SVGSVGElement ? scaleFor(container).y : 1;
+    const style = getComputedStyle(container);
+    const inline = container instanceof HTMLElement && style.display === 'inline';
+    let clientLeft = inline ? parseFloat(style.borderLeftWidth) : container.clientLeft;
+    let clientTop = inline ? parseFloat(style.borderTopWidth) : container.clientTop;
+    let clientWidth = inline ? bounds.width / scaleX - clientLeft - parseFloat(style.borderRightWidth) : container.clientWidth;
+    let clientHeight = inline ? bounds.height / scaleY - clientTop - parseFloat(style.borderBottomWidth) : container.clientHeight;
+    if (box === 'border-box') {
+      clientLeft = clientTop = 0;
+      clientWidth = bounds.width / scaleX;
+      clientHeight = bounds.height / scaleY;
+    } else if (box === 'content-box') {
+      clientLeft += parseFloat(style.paddingLeft);
+      clientTop += parseFloat(style.paddingTop);
+      clientWidth -= parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      clientHeight -= parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    }
+    const transform = transformFor(container);
     const left = transform.a < 0 ? bounds.right - (clientLeft + clientWidth) * scaleX : bounds.left + clientLeft * scaleX;
     const top = transform.d < 0 ? bounds.bottom - (clientTop + clientHeight) * scaleY : bounds.top + clientTop * scaleY;
     const result = { left, top, right: left + clientWidth * scaleX, bottom: top + clientHeight * scaleY };
@@ -254,7 +271,22 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       element: node,
       x: /^(hidden|clip)$/.test(styleOf(node).overflowX),
       y: /^(hidden|clip)$/.test(styleOf(node).overflowY),
-    })).filter(clip => clip.x || clip.y).map(clip => ({ ...clip, bounds: clientBounds(clip.element) }));
+    })).filter(clip => clip.x || clip.y).map(clip => {
+      const style = styleOf(clip.element);
+      const value = style.overflowClipMargin;
+      const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
+      const margin = parseFloat(value.match(/[\d.]+px/)?.[0] ?? '0');
+      const base = clientBounds(clip.element);
+      const expanded = clientBounds(clip.element, reference);
+      const scale = scaleFor(clip.element);
+      const x = style.overflowX === 'clip', y = style.overflowY === 'clip';
+      return { ...clip, bounds: {
+        left: x ? expanded.left - margin * scale.x : base.left,
+        right: x ? expanded.right + margin * scale.x : base.right,
+        top: y ? expanded.top - margin * scale.y : base.top,
+        bottom: y ? expanded.bottom + margin * scale.y : base.bottom,
+      } };
+    });
     return {
       ancestors,
       clips,
