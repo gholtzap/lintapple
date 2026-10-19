@@ -396,8 +396,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         const nodeStyle = getComputedStyle(node);
         if (parseFloat(nodeStyle.opacity) !== 1 || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
       }
-      if (unsupported || style.textShadow !== 'none' || style.filter !== 'none' || style.mixBlendMode !== 'normal') {
-        reportContrast(el, 'unresolved', data, 'placeholder opacity, filters, blend modes, or text shadows need review');
+      if (unsupported || parseFloat(style.webkitTextStrokeWidth) > 0 || style.textShadow !== 'none' || style.filter !== 'none' || style.mixBlendMode !== 'normal') {
+        reportContrast(el, 'unresolved', data, 'placeholder opacity, strokes, filters, blend modes, or text shadows need review');
         continue;
       }
       try {
