@@ -19,6 +19,7 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
       const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
       const context = canvas.getContext('2d', { willReadFrequently: true })!;
       const texts = [...svg.querySelectorAll<SVGTextContentElement>('text,tspan')].filter(el =>
+        !el.closest('button:disabled, [aria-disabled="true"]') &&
         [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) &&
         el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && el.getBoundingClientRect().width > 0).map(el => {
         const style = getComputedStyle(el), bounds = el.getBoundingClientRect();
