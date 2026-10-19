@@ -173,8 +173,15 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
     const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
     const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : container instanceof SVGSVGElement ? scaleFor(container).y : 1;
-    const left = bounds.left + container.clientLeft * scaleX;
-    const top = bounds.top + container.clientTop * scaleY;
+    let transform = new DOMMatrix();
+    for (let node: Element | null = container; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      const matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
+      const [x, y = x] = style.scale === 'none' ? [1, 1] : style.scale.split(/\s+/).map(Number);
+      transform = matrix.scale(x, y).multiply(transform);
+    }
+    const left = transform.a < 0 ? bounds.right - (container.clientLeft + container.clientWidth) * scaleX : bounds.left + container.clientLeft * scaleX;
+    const top = transform.d < 0 ? bounds.bottom - (container.clientTop + container.clientHeight) * scaleY : bounds.top + container.clientTop * scaleY;
     const result = { left, top, right: left + container.clientWidth * scaleX, bottom: top + container.clientHeight * scaleY };
     if (!Object.values(result).every(Number.isFinite)) throw new Error('A clipping or control container must have a measurable HTML box.');
     return result;
