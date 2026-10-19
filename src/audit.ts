@@ -27,7 +27,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
-  const controls = elements.filter(el => el.matches('button, [role="button"], input[type="button"], input[type="submit"], input[type="reset"]'));
+  const controls = elements.filter(el => el.matches('button, [role="button"], input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]'));
   const isText = (el: Element) => [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) || el.matches('input, textarea, select');
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
