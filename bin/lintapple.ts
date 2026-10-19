@@ -38,7 +38,8 @@ try {
   // A host followed by a numeric port is not a URL scheme.
   if (!/^[a-z][a-z\d+.-]*:(?!\d+(?:[/?#]|$))/i.test(url)) {
     const parsed = new URL(`https://${url}`);
-    const local = parsed.hostname === 'localhost' || parsed.hostname === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(parsed.hostname);
+    const hostname = parsed.hostname.replace(/\.$/, '');
+    const local = hostname === 'localhost' || hostname === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(hostname);
     if (local) parsed.protocol = 'http:';
     if (local || parsed.hostname.includes('.')) url = parsed.href;
   }

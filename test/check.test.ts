@@ -62,6 +62,7 @@ test('CLI supplies a scheme and preserves explicit schemes and URL parts', async
     ['example.test:1/path?x=1#section', 'https://example.test:1/path?x=1#section'],
     ['127.example.test:1/path', 'https://127.example.test:1/path'],
     ['localhost:1/path', 'http://localhost:1/path'],
+    ['localhost.:1/path', 'http://localhost.:1/path'],
     ['127.0.0.1:1/path', 'http://127.0.0.1:1/path'],
     ['[::1]:1/path', 'http://[::1]:1/path'],
     ['http://example.test:1/path', 'http://example.test:1/path'],
@@ -95,7 +96,7 @@ test('CLI checks real pages, reports stable failures, and rejects invalid input'
     assert.equal(passed.findings.length, 0);
     assert.equal(passed.runs.length, 2);
     assert.ok(passed.runs.every(run => run.elements > 0));
-    for (const host of ['127.0.0.1', 'localhost']) {
+    for (const host of ['127.0.0.1', 'localhost', 'localhost.']) {
       const implicit = await cli([`${host}:${(server.address() as AddressInfo).port}`, '--json']);
       assert.equal(implicit.code, 0, implicit.stderr);
       assert.equal(JSON.parse(implicit.stdout).url, `http://${host}:${(server.address() as AddressInfo).port}/`);
