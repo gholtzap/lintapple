@@ -41,17 +41,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.', undefined, { selector: `${selector(el)}${pseudo}` });
     checkFontSize(el, style, pseudo);
   };
+  const placeholderStyle = (el: Element) => {
+    if (!el.matches('input:placeholder-shown, textarea:placeholder-shown') || !el.getAttribute('placeholder')?.trim()) return null;
+    const style = getComputedStyle(el, '::placeholder');
+    return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? style : null;
+  };
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el)!;
     if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
     if (!el.closest('pre, code, kbd, samp'))
       for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFontSize(el, textStyle, pseudo);
-    if (!el.closest('pre, code, kbd, samp') && el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) {
-      const placeholder = getComputedStyle(el, '::placeholder');
-      if (placeholder.display !== 'none' && placeholder.visibility === 'visible' && parseFloat(placeholder.opacity) > 0 && parseFloat(placeholder.fontSize) > 0)
-        checkFont(el, placeholder, '::placeholder');
-    }
+    const placeholder = placeholderStyle(el);
+    if (placeholder && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
@@ -67,14 +69,21 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     if (copyText.has(el)) return copyText.get(el)!;
     if (el.matches('pre, code, kbd, samp')) return '\0';
     if (!hasVisibleContent(el)) return '';
-    const text = (el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? (el as HTMLInputElement).value : [...el.childNodes].map(node => {
+    const generated = generatedTextStyles(el);
+    const generatedText = (pseudo: string) => {
+      const item = generated.find(item => item.pseudo === pseudo);
+      if (!item) return '';
+      return item.style.display.startsWith('inline') || item.style.display === 'contents' ? item.text : `\n${item.text}\n`;
+    };
+    const content = (el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? (el as HTMLInputElement).value : [...el.childNodes].map(node => {
       if (node.nodeType === Node.TEXT_NODE) return visible(el) ? node.textContent : '';
       if (node.nodeType !== Node.ELEMENT_NODE) return '';
       if ((node as Element).tagName === 'BR') return '\n';
       const content = textOf(node as Element);
       const display = getComputedStyle(node as Element).display;
       return display.startsWith('inline') || display === 'contents' ? content : `\n${content}\n`;
-    }).join('')).replace(/\s+/g, ' ').toLowerCase();
+    }).join(''));
+    const text = (generatedText('::before') + content + generatedText('::after')).replace(/\s+/g, ' ').toLowerCase();
     copyText.set(el, text);
     return text;
   };
@@ -366,7 +375,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       } catch (error) { reportContrast(el, 'unresolved', data, `boxless text calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
     for (const el of elements.filter(el => el.matches('input:placeholder-shown, textarea:placeholder-shown') && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'))) {
-      const style = getComputedStyle(el, '::placeholder');
+      const style = placeholderStyle(el);
+      if (!style) continue;
       const size = parseFloat(style.fontSize), bold = parseFloat(style.fontWeight) >= 700;
       const required = size >= 24 || (bold && size >= 56 / 3) ? 3 : 4.5;
       const data = { expectedContrastRatio: `${required}:1` };
