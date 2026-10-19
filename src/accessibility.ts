@@ -51,6 +51,13 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
   engine.setup(document);
   try {
     const refs = (el: Element) => (el.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).map(id => document.getElementById(id));
+    const labelText = (el: Element) => engine.commons.text.accessibleText(el, { inLabelledByContext: true }).trim();
+    const hasLabelText = (label: Element, control: Element): boolean => {
+      if (label === control) return false;
+      if (!label.contains(control)) return Boolean(labelText(label));
+      // A field's placeholder is not text in its wrapping label.
+      return [...label.childNodes].some(node => node.nodeType === Node.TEXT_NODE ? Boolean(node.textContent?.trim()) : node instanceof Element && hasLabelText(node, control));
+    };
     for (const el of elements) {
       for (const attr of ['aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns', 'aria-activedescendant', 'aria-details', 'aria-errormessage', 'aria-flowto']) {
         if (!el.hasAttribute(attr)) continue;
@@ -61,7 +68,7 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
         if (!ids.length || missing.length) add('aria-reference', el, `${attr}: ${missing.join(', ') || 'empty reference'}`, 'ARIA references to existing element IDs', 'Correct the IDs or render the referenced elements.', null, { status: 'failed', category: 'accessibility' });
       }
       if (el.matches('input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]), textarea, select')) {
-        const named = el.getAttribute('aria-label')?.trim() || refs(el).some(ref => ref?.textContent?.trim()) || [...((el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).labels || [])].some(label => label.textContent?.trim());
+        const named = el.getAttribute('aria-label')?.trim() || refs(el).some(ref => ref && labelText(ref)) || [...((el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).labels || [])].some(label => hasLabelText(label, el));
         if (!named && !reported.has(`form-label:${elements.indexOf(el)}`)) add('form-label', el, 'no label beyond a placeholder or title', 'a programmatic form label', 'Use a label element, aria-label, or aria-labelledby. Keep placeholders as examples.', null, { status: 'failed', category: 'accessibility' });
       }
       if (el.matches('[data-ui-disclosure], button[aria-haspopup="menu"], button[aria-haspopup="true"], [role="button"][aria-haspopup="menu"], [role="button"][aria-haspopup="true"]')) {
