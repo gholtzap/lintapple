@@ -46,7 +46,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = styles.get(el)!;
     if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
     if (!el.closest('pre, code, kbd, samp'))
-      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFontSize(el, textStyle, pseudo);
+      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
     if (!el.closest('pre, code, kbd, samp') && el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) {
       const placeholder = getComputedStyle(el, '::placeholder');
       if (placeholder.display !== 'none' && placeholder.visibility === 'visible' && parseFloat(placeholder.opacity) > 0 && parseFloat(placeholder.fontSize) > 0)
