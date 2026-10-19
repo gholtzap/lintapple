@@ -63,7 +63,9 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
       numericElements++;
-      if (!style.fontVariantNumeric.split(/\s+/).includes('tabular-nums') && !/['"]tnum['"](?:\s+(?:1|on))?(?:\s*,|$)/.test(style.fontFeatureSettings))
+      const feature = style.fontFeatureSettings.match(/['"]tnum['"](?:\s+(\d+|on|off))?(?=\s*,|$)/)?.[1];
+      const tabular = /['"]tnum['"]/.test(style.fontFeatureSettings) ? feature !== 'off' && feature !== '0' : style.fontVariantNumeric.split(/\s+/).includes('tabular-nums');
+      if (!tabular)
         add('tabular-numbers', el, style.fontVariantNumeric, 'tabular digits', 'Set font-variant-numeric: tabular-nums. Use a font that supports tabular figures.');
       if (numericCell && style.textAlign !== 'right' && style.textAlign !== (style.direction === 'rtl' ? 'start' : 'end'))
         add('numeric-alignment', el, style.textAlign, 'right-aligned numeric table cells', 'Set text-align: right on the numeric column.');
