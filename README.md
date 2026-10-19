@@ -25,6 +25,11 @@ Start your app, then run:
 npm run lint:ui
 ```
 
+Text reports group repeated problems and list their states, screen sizes, and themes.
+The JSON report keeps every finding and adds a `summary` with counts by rule and groups with all measurements.
+A group means the same rule, element, expected value, interaction phase, document, and frame path. Measured values can differ between occurrences.
+Confirmed failures and unresolved checks have separate counts. Unresolved checks require review and still exit with code `1`.
+The CLI writes the active font policy to stderr before the check. A font mismatch means the page differs from that policy.
 Each finding includes the rule, element, measured value, and suggested fix.
 Exit codes: `0` passed, `1` findings, `2` check did not finish.
 
@@ -46,7 +51,12 @@ import { expectUI } from 'lintapple/playwright';
 await expectUI(page, testInfo);
 ```
 
-Findings fail the test and attach a JSON report. The helper reads your `ui-policy.json`.
+Checks apply to the current document. Child frames are not checked automatically.
+Each page and state report includes `frameCoverage` with the checked document and omitted child frames, including nested frames. Frame paths such as `main/0/1` identify frames by their child order at the time of the check.
+To check a frame, call `checkPage(frame)` separately. This includes cross-origin frames that Playwright can access.
+A check with no findings does not prove that omitted frames pass.
+
+Findings fail the test and attach a JSON report. If a passing page has omitted frames, the helper attaches a coverage report. The helper reads your `ui-policy.json`.
 See the [example tests](examples/playwright/).
 
 ## Mark layout elements

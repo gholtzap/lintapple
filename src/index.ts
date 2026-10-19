@@ -6,7 +6,8 @@ import { launchBrowser } from './browser.js';
 import axe from 'axe-core';
 import { audit } from './audit.js';
 import { auditAccessibility } from './accessibility.js';
-import { finding } from './report.js';
+import { finding, summarizeFindings } from './report.js';
+export { summarizeFindings } from './report.js';
 import { runInteractions, validateInteractions } from './interactions.js';
 import { createVisibility } from './visibility.js';
 import { svgTextContrast } from './svg-contrast.js';
@@ -68,7 +69,17 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
   const accessibility = await page.evaluateHandle<typeof auditAccessibility>(`(${auditAccessibility.toString()})`);
   const format = await page.evaluateHandle<typeof finding>(`(${finding.toString()})`);
   const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
-  try { return await page.evaluate(audit, { policy, contrast, accessibility, format, visibility, svgContrast }); }
+  try {
+    const result = await page.evaluate(audit, { policy, contrast, accessibility, format, visibility, svgContrast });
+    const frame = 'mainFrame' in page ? page.mainFrame() : page;
+    const descendants = (parent: Frame): Frame[] => parent.childFrames().flatMap(child => [child, ...descendants(child)]);
+    const path = (frame: Frame): string => {
+      const parent = frame.parentFrame();
+      return parent ? `${path(parent)}/${parent.childFrames().indexOf(frame)}` : 'main';
+    };
+    const describe = (frame: Frame) => ({ url: frame.url(), name: frame.name(), path: path(frame) });
+    return { ...result, findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
+  }
   finally { await Promise.all([contrast.dispose(), accessibility.dispose(), format.dispose(), visibility.dispose()]); }
 }
 
@@ -94,7 +105,7 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
   const policy = validatePolicy(input);
   if (interactions !== undefined) validateInteractions(interactions);
   const browser = await launchBrowser();
-  const report: UrlReport = { url, rules: ruleIds, runs: [], findings: [] };
+  const report: UrlReport = { url, rules: ruleIds, runs: [], findings: [], summary: summarizeFindings([]) };
   try {
     for (const viewport of policy.viewports) for (const colorScheme of policy.colorSchemes) {
       const context = await browser.newContext({ viewport, colorScheme, reducedMotion: 'reduce', locale: 'en-US', timezoneId: 'UTC', deviceScaleFactor: 1 });
@@ -120,10 +131,11 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
           accessibilityCoverage.interactions = interaction.checks;
           accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : interaction.states.length ? 'not tested: page-state actions only' : 'not tested: empty interaction plan';
         }
-        report.runs.push({ viewport, colorScheme, elements: result.elements, controls: result.controls, insetControls: result.insetControls, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
+        report.runs.push({ viewport, colorScheme, frameCoverage: result.frameCoverage, elements: result.elements, controls: result.controls, insetControls: result.insetControls, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
         report.findings.push(...findings.map(f => ({ ...f, viewport, colorScheme })));
       } finally { await context.close(); }
     }
+    report.summary = summarizeFindings(report.findings);
     return report;
   } finally { await browser.close(); }
 }

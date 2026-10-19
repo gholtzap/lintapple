@@ -2,7 +2,7 @@ import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, Ru
 type Bounds = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>;
 interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
 // Runs in the browser. Use one report shape for all design rules.
-export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }: AuditInput): Promise<PageReport> {
+export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   const findings: Finding[] = [];
@@ -31,7 +31,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   const isText = (el: Element) => [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) || el.matches('input, textarea, select');
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
-    const sizes = policy.typeRules.find(rule => el.closest(rule.selector))?.sizes ?? policy.fontSizes;
+    const tooltip = el.closest('[role="tooltip"]');
+    const sizes = policy.typeRules.find(rule => {
+      const role = el.closest(rule.selector);
+      return role && (!tooltip || tooltip.contains(role));
+    })?.sizes ?? policy.fontSizes;
     if (!sizes.some(allowed => Math.abs(size - allowed) < 0.1))
       add('font-size', el, `${size}px`, `one of ${sizes.join(', ')}px`, 'Use a configured size for this text role.', undefined, { selector: `${selector(el)}${pseudo}` });
   };

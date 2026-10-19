@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { validateInteractions } from '../src/interactions.js';
-import { checkUrl } from '../src/index.js';
+import { checkUrl, validatePolicy } from '../src/index.js';
 import { initProject, loadProjectPolicy, parseJson } from '../src/project.js';
+import { formatSummary, formatFrameCoverage } from '../src/report.js';
 import { formatCliError } from '../src/cli-error.js';
 
 const usage = `Usage: lintapple <url> [--config path] [--ready selector] [--interactions path] [--json]
@@ -43,12 +44,14 @@ try {
   }
   const policy = await loadProjectPolicy(config);
   const interactions = interactionsPath ? validateInteractions(parseJson(await readFile(interactionsPath, 'utf8'), interactionsPath)) : undefined;
+  const approved = validatePolicy(policy);
+  console.error(`Policy: ${Object.keys(policy).length ? config ?? 'ui-policy.json' : 'package defaults'}. Approved fonts: ${approved.fonts.join(', ')}. Text sizes: ${approved.fontSizes.join(', ')}px. Font-family and font-size findings compare the page with this policy.`);
   const report = await checkUrl(url, policy, { ready, interactions });
   if (json) console.log(JSON.stringify(report, null, 2));
   else {
     const count = report.runs.reduce((sum, run) => sum + run.states.length, 0);
-    console.log(`${report.findings.length ? 'Failed' : 'Passed'}: ${report.findings.length} UI findings across ${count} page checks.`);
-    for (const f of report.findings) console.log(`\n${f.rule} (${f.viewport.width}px, ${f.colorScheme}, ${f.state || 'interaction'})\n${f.selector}\n${f.message}\nFix: ${f.fix}`);
+    console.log(`${report.findings.length ? 'Failed' : 'Passed'} across ${count} page checks. ${formatSummary(report.summary)}`);
+    console.log(formatFrameCoverage(report.runs.flatMap(run => run.states.map(state => state.frameCoverage))));
     const suppressed = report.runs.reduce((sum, run) => sum + run.suppressed.length, 0);
     if (suppressed) console.log(`\n${suppressed} findings excluded by policy. See the JSON report for reasons.`);
   }

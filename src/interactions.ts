@@ -59,7 +59,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     const locator = page.locator(selector);
     const exception = await locator.count() === 1 ? await locator.evaluate((el, { exceptions, rule }) => exceptions.find(e => e.rules.includes(rule) && el.matches(e.selector)), { exceptions: policy.exceptions, rule }) : null;
     if (exception) { suppressed.push({ rule, selector, reason: exception.reason }); return; }
-    findings.push(finding(rule, selector, actual ?? '', expected, fix, { category: rule === 'icon-button-tooltip' ? 'design' : 'accessibility', ...details, status }));
+    findings.push(finding(rule, selector, actual ?? '', expected, fix, { documentUrl: page.url(), framePath: 'main', category: rule === 'icon-button-tooltip' ? 'design' : 'accessibility', ...details, status }));
   };
   const wait: Wait = async (fn, argument) => {
     try { await page.waitForFunction(fn, argument, { timeout: plan.timeout }); return true; }

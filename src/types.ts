@@ -29,6 +29,8 @@ export interface FindingDetails {
   category?: 'accessibility' | 'design';
   sourceRule?: string;
   helpUrl?: string;
+  documentUrl?: string;
+  framePath?: string;
   phase?: string;
   focusSelector?: string;
   outcomeSelector?: string;
@@ -49,7 +51,25 @@ export interface Finding extends FindingDetails {
 export interface SuppressedFinding { rule: RuleId; selector: string; reason: string; state?: string }
 export interface InteractionCheck extends FindingDetails { rule: RuleId; selector: string; status: Status }
 export interface AccessibilityCoverage { pageRules: RuleId[]; interactionRules: string; interactions?: InteractionCheck[] }
+export interface FrameLocation { url: string; name: string; path: string }
+export interface FrameCoverage {
+  checked: FrameLocation;
+  omitted: FrameLocation[];
+}
+export interface FindingOccurrence {
+  state?: string;
+  viewport?: Policy['viewports'][number];
+  colorScheme?: 'light' | 'dark';
+  actual: string;
+}
+export interface FindingGroup { finding: Finding; occurrences: FindingOccurrence[] }
+export interface FindingCounts { occurrences: number; problems: number; failed: number; unresolved: number }
+export interface FindingSummary extends FindingCounts {
+  byRule: (FindingCounts & { rule: RuleId })[];
+  groups: FindingGroup[];
+}
 export interface PageReport {
+  frameCoverage: FrameCoverage;
   findings: Finding[];
   suppressed: SuppressedFinding[];
   accessibilityCoverage: AccessibilityCoverage;
@@ -63,6 +83,7 @@ export interface PageReport {
 export interface StateReport extends PageReport { name: string; url: string }
 export interface InteractionReport { findings: Finding[]; suppressed: SuppressedFinding[]; checks: InteractionCheck[]; states: StateReport[] }
 export interface UrlReport {
+  summary: FindingSummary;
   url: string;
   rules: readonly RuleId[];
   runs: (Omit<PageReport, 'findings'> & { viewport: Policy['viewports'][number]; colorScheme: 'light' | 'dark'; states: StateReport[] })[];
