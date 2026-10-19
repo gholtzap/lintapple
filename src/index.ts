@@ -12,6 +12,10 @@ import { runInteractions, validateInteractions } from './interactions.js';
 import { createVisibility } from './visibility.js';
 import { svgTextContrast } from './svg-contrast.js';
 
+// Load the module export without assigning the app's global property.
+const engineSource = axe.source.replace('window.axe = axe;', '');
+if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
+
 export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
@@ -64,8 +68,7 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
     await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });
   const svgContrast = await svgTextContrast(page);
-  // Keep the app's own axe object unchanged. Each check gets a fresh engine.
-  const contrast = await page.evaluateHandle<AxeEngine>(`(() => { const previous = window.axe; ${axe.source}\n const engine = window.axe; window.axe = previous; return engine; })()`);
+  const contrast = await page.evaluateHandle<AxeEngine>(`(() => { const module = { exports: {} }; const define = undefined; ${engineSource}\n return module.exports; })()`);
   const accessibility = await page.evaluateHandle<typeof auditAccessibility>(`(${auditAccessibility.toString()})`);
   const format = await page.evaluateHandle<typeof finding>(`(${finding.toString()})`);
   const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
