@@ -41,17 +41,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.', undefined, { selector: `${selector(el)}${pseudo}` });
     checkFontSize(el, style, pseudo);
   };
+  const placeholderStyle = (el: Element) => {
+    if (!el.matches('input:placeholder-shown, textarea:placeholder-shown') || !el.getAttribute('placeholder')?.trim()) return null;
+    const style = getComputedStyle(el, '::placeholder');
+    return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? style : null;
+  };
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el)!;
     if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
     if (!el.closest('pre, code, kbd, samp'))
       for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
-    if (!el.closest('pre, code, kbd, samp') && el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) {
-      const placeholder = getComputedStyle(el, '::placeholder');
-      if (placeholder.display !== 'none' && placeholder.visibility === 'visible' && parseFloat(placeholder.opacity) > 0 && parseFloat(placeholder.fontSize) > 0)
-        checkFont(el, placeholder, '::placeholder');
-    }
+    const placeholder = placeholderStyle(el);
+    if (placeholder && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
@@ -366,7 +368,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       } catch (error) { reportContrast(el, 'unresolved', data, `boxless text calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
     for (const el of elements.filter(el => el.matches('input:placeholder-shown, textarea:placeholder-shown') && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'))) {
-      const style = getComputedStyle(el, '::placeholder');
+      const style = placeholderStyle(el);
+      if (!style) continue;
       const size = parseFloat(style.fontSize), bold = parseFloat(style.fontWeight) >= 700;
       const required = size >= 24 || (bold && size >= 56 / 3) ? 3 : 4.5;
       const data = { expectedContrastRatio: `${required}:1` };
