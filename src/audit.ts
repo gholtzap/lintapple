@@ -51,7 +51,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = styles.get(el)!;
     if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
     if (!el.closest('pre, code, kbd, samp'))
-      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFontSize(el, textStyle, pseudo);
+      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
     const placeholder = placeholderStyle(el);
     if (placeholder && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
