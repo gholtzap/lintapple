@@ -307,6 +307,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     for (const result of results) for (const node of result.nodes) {
       const el = node.element;
       if (!inScope.has(el) || !visible(el)) continue;
+      if (el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) continue;
       if (svgContrast.some(result => document.querySelector(result.selector) === el)) continue;
       const check = [...node.any, ...node.all, ...node.none].find(check => check.id === 'color-contrast');
       const data = check?.data ?? {};
@@ -381,7 +382,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       try {
         const background = contrast.commons.color.getBackgroundColor(el);
         if (!background) { reportContrast(el, 'unresolved', data, 'placeholder background needs review'); continue; }
-        const foreground = new contrast.commons.color.Color().parseString(style.color);
+        const foreground = new contrast.commons.color.Color().parseString(style.webkitTextFillColor || style.color);
         foreground.alpha *= parseFloat(style.opacity);
         const blended = contrast.commons.color.flattenColors(foreground, background);
         const ratio = contrast.commons.color.getContrast(background, blended);
