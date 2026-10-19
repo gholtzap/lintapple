@@ -55,6 +55,10 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = getComputedStyle(el, '::placeholder');
     return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? style : null;
   };
+  const hasTabularNumbers = (style: CSSStyleDeclaration) => {
+    const feature = style.fontFeatureSettings.match(/['"]tnum['"](?:\s+(\d+|on|off))?(?=\s*,|$)/)?.[1];
+    return /['"]tnum['"]/.test(style.fontFeatureSettings) ? feature !== 'off' && feature !== '0' : style.fontVariantNumeric.split(/\s+/).includes('tabular-nums');
+  };
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el)!;
@@ -67,10 +71,14 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
       numericElements++;
-      const feature = style.fontFeatureSettings.match(/['"]tnum['"](?:\s+(\d+|on|off))?(?=\s*,|$)/)?.[1];
-      const tabular = /['"]tnum['"]/.test(style.fontFeatureSettings) ? feature !== 'off' && feature !== '0' : style.fontVariantNumeric.split(/\s+/).includes('tabular-nums');
-      if (!tabular)
-        add('tabular-numbers', el, style.fontVariantNumeric, 'tabular digits', 'Set font-variant-numeric: tabular-nums. Use a font that supports tabular figures.');
+      const numberStyles = [el, ...el.querySelectorAll('*')].filter(visible).flatMap(node => {
+        const own = textRects(node).length && [...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && /\d/.test(child.textContent ?? '')) ? [styles.get(node)!] : [];
+        return [...own, ...generatedTextStyles(node).filter(item => /\d/.test(item.text)).map(item => item.style)];
+      });
+      if (!numberStyles.length) numberStyles.push(style);
+      const proportional = numberStyles.find(textStyle => !hasTabularNumbers(textStyle));
+      if (proportional)
+        add('tabular-numbers', el, proportional.fontVariantNumeric, 'tabular digits', 'Set font-variant-numeric: tabular-nums. Use a font that supports tabular figures.');
       if (numericCell && style.textAlign !== 'right' && style.textAlign !== (style.direction === 'rtl' ? 'start' : 'end'))
         add('numeric-alignment', el, style.textAlign, 'right-aligned numeric table cells', 'Set text-align: right on the numeric column.');
     }
