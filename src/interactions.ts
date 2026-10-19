@@ -115,15 +115,48 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
       const left = Math.max(0, rect.left), top = Math.max(0, rect.top), right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
       if (left >= right || top >= bottom) return { status: 'failed' as const, actual: 'focused control is outside the viewport' };
       const points = [[left + 1, top + 1], [right - 1, top + 1], [left + 1, bottom - 1], [right - 1, bottom - 1], [(left + right) / 2, (top + bottom) / 2]];
-      const hits = points.map(([x, y]) => document.elementFromPoint(x, y));
-      if (hits.some(hit => hit && (hit === el || el.contains(hit)))) return { status: 'passed' as const };
-      const cover = hits[0];
-      if (cover && hits.every(hit => hit === cover)) {
-        const box = cover.getBoundingClientRect(), style = getComputedStyle(cover);
-        const opaque = /^rgb\(/.test(style.backgroundColor) && style.opacity === '1' && style.clipPath === 'none' && style.maskImage === 'none' && style.borderRadius === '0px';
-        if (opaque && box.left <= rect.left && box.top <= rect.top && box.right >= rect.right && box.bottom >= rect.bottom) return { status: 'failed' as const, actual: 'an opaque element covers the focused control' };
+      // Hit testing omits painted layers with pointer-events:none.
+      const overrides = [...document.querySelectorAll<HTMLElement | SVGElement>('*')].filter(node => node.style && getComputedStyle(node).pointerEvents === 'none').map(node => ({ node, style: node.getAttribute('style') }));
+      try {
+        for (const { node } of overrides) node.style.setProperty('pointer-events', 'auto', 'important');
+        const covers: Element[] = [];
+        for (const [x, y] of points) {
+          let uncertain = false;
+          for (const node of document.elementsFromPoint(x, y)) {
+            let hidden = false, effects = false;
+            for (let ancestor: Element | null = node; ancestor; ancestor = ancestor.parentElement) {
+              const style = getComputedStyle(ancestor);
+              hidden ||= parseFloat(style.opacity) === 0;
+              effects ||= parseFloat(style.opacity) !== 1 || style.filter !== 'none' || style.backdropFilter !== 'none' || style.mixBlendMode !== 'normal' || style.clipPath !== 'none' || style.maskImage !== 'none' || style.transform !== 'none';
+            }
+            if (hidden) continue;
+            if (node === el || el.contains(node)) {
+              if (!uncertain) return { status: 'passed' as const };
+              break;
+            }
+            const style = getComputedStyle(node);
+            const pseudo = ['::before', '::after'].some(pseudo => !['none', 'normal', '""'].includes(getComputedStyle(node, pseudo).content));
+            if (node.contains(el)) { uncertain ||= pseudo; continue; }
+            if (!effects && /^rgb\(/.test(style.backgroundColor) && style.borderRadius === '0px') {
+              covers.push(node);
+              break;
+            }
+            const clear = ['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor) && style.backgroundImage === 'none' && style.boxShadow === 'none' && style.outlineStyle === 'none' && ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].every(key => style[key as keyof CSSStyleDeclaration] === '0px') && !pseudo && ![...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) && !node.matches('img,svg,canvas,video,iframe,input,textarea,select');
+            uncertain ||= effects || !clear;
+          }
+        }
+        const cover = covers[0];
+        if (covers.length === points.length && covers.every(node => node === cover)) {
+          const box = cover.getBoundingClientRect();
+          if (box.left <= rect.left && box.top <= rect.top && box.right >= rect.right && box.bottom >= rect.bottom) return { status: 'failed' as const, actual: 'an opaque element covers the focused control' };
+        }
+        return { status: 'unresolved' as const, actual: 'painted focus coverage needs review' };
+      } finally {
+        // This measurement is synchronous, so no user action runs during the overrides.
+        for (const { node, style } of overrides) {
+          if (style === null) node.removeAttribute('style'); else node.setAttribute('style', style);
+        }
       }
-      return { status: 'unresolved' as const, actual: 'all sampled focus points are covered; review the painted result' };
     });
     await record('focus-obscured', item.selector, exposure.status === 'passed', exposure.actual, 'the focused control to remain visible', 'Keep focused controls in view and clear of sticky bars and overlays.', { status: exposure.status, phase: 'keyboard-focus' });
     await inspect(`focus[${index}]: keyboard focus`);
