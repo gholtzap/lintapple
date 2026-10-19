@@ -14,7 +14,8 @@ export function createVisibility() {
     const style = getComputedStyle(el, pseudo);
     const literal = style.content.match(/^"((?:[^"\\]|\\.)*)"/)?.[1];
     const text = literal?.replace(/\\([\da-f]{1,6})\s?|\\(.)/gi, (_: string, hex: string | undefined, escaped: string) => hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : escaped);
-    if (!text?.trim() || style.display === 'none' || style.visibility !== 'visible' || (style.display !== 'contents' && parseFloat(style.opacity) === 0) || parseFloat(style.fontSize) === 0) return [];
+    const counter = [...style.content.matchAll(/(?:^|\s)(counters?\([^)]*\))/g)].some(([, value]) => !/,\s*none\)$/.test(value));
+    if ((!text?.trim() && !counter) || style.display === 'none' || style.visibility !== 'visible' || (style.display !== 'contents' && parseFloat(style.opacity) === 0) || parseFloat(style.fontSize) === 0) return [];
     return [{ pseudo, style }];
   });
   const visible = (el: Element | null | undefined): boolean => {
