@@ -171,8 +171,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   const clientBounds = (container: Element) => {
     const bounds = container.getBoundingClientRect();
     // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
-    const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : 1;
-    const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : 1;
+    const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
+    const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : container instanceof SVGSVGElement ? scaleFor(container).y : 1;
     const left = bounds.left + container.clientLeft * scaleX;
     const top = bounds.top + container.clientTop * scaleY;
     const result = { left, top, right: left + container.clientWidth * scaleX, bottom: top + container.clientHeight * scaleY };
@@ -235,7 +235,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       if (position === 'fixed' && !offsetParent) break;
       containingBlock = ['absolute', 'fixed'].includes(position) ? offsetParent ?? document.documentElement : null;
     }
-    const clips = ancestors.filter(node => node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => ({
+    const clips = ancestors.filter(node => node instanceof SVGSVGElement || node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => ({
       element: node,
       x: /^(hidden|clip)$/.test(styleOf(node).overflowX),
       y: /^(hidden|clip)$/.test(styleOf(node).overflowY),
@@ -260,7 +260,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
     return result;
   };
-  for (const el of elements.filter(el => el instanceof HTMLElement || el.tagName.toLowerCase() === 'svg')) {
+  for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
     const context = contextFor(el);
     const rects = textRects(el);
     const escaped = new Map<string, number>();
