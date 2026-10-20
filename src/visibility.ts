@@ -31,6 +31,10 @@ export function createVisibility() {
     // Boxless elements can paint text. Opacity applies only to ancestor boxes.
     for (let node: Element | null = el; node; node = node.parentElement) {
       const style = getComputedStyle(node);
+      if (node instanceof HTMLDetailsElement && !node.open && el !== node) {
+        const summary: Element | undefined = [...node.children].find(child => child.tagName === 'SUMMARY');
+        if (!summary?.contains(el)) return false;
+      }
       if (style.display === 'none' || (style.display !== 'contents' && (style.contentVisibility === 'hidden' || parseFloat(style.opacity) === 0))) return false;
     }
     return true;
