@@ -267,11 +267,13 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       if (position === 'fixed' && !offsetParent) break;
       containingBlock = ['absolute', 'fixed'].includes(position) ? offsetParent ?? document.documentElement : null;
     }
-    const clips = ancestors.filter(node => node instanceof SVGSVGElement || node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => ({
-      element: node,
-      x: /^(hidden|clip)$/.test(styleOf(node).overflowX),
-      y: /^(hidden|clip)$/.test(styleOf(node).overflowY),
-    })).filter(clip => clip.x || clip.y).map(clip => {
+    const clips = ancestors.filter(node => node instanceof SVGSVGElement || node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => {
+      const style = styleOf(node);
+      const paint = /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
+      const overflowX = paint && style.overflowX === 'visible' ? 'clip' : style.overflowX;
+      const overflowY = paint && style.overflowY === 'visible' ? 'clip' : style.overflowY;
+      return { element: node, overflowX, overflowY, x: /^(hidden|clip)$/.test(overflowX), y: /^(hidden|clip)$/.test(overflowY) };
+    }).filter(clip => clip.x || clip.y).map(clip => {
       const style = styleOf(clip.element);
       const value = style.overflowClipMargin;
       const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
@@ -279,7 +281,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const base = clientBounds(clip.element);
       const expanded = clientBounds(clip.element, reference);
       const scale = scaleFor(clip.element);
-      const x = style.overflowX === 'clip', y = style.overflowY === 'clip';
+      const x = clip.overflowX === 'clip', y = clip.overflowY === 'clip';
       return { ...clip, bounds: {
         left: x ? expanded.left - margin * scale.x : base.left,
         right: x ? expanded.right + margin * scale.x : base.right,
