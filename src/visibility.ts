@@ -26,12 +26,12 @@ export function createVisibility() {
   const visible = (el: Element | null | undefined): boolean => {
     if (!el?.isConnected || el.closest('[inert]')) return false;
     const bounds = el.getBoundingClientRect();
-    if (el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && bounds.width > 0 && bounds.height > 0) return true;
-    if (!generatedTextStyles(el).length && (getComputedStyle(el).visibility !== 'visible' || !textRects(el).length)) return false;
+    const boxVisible = el.checkVisibility({ checkVisibilityCSS: true }) && bounds.width > 0 && bounds.height > 0;
+    if (!boxVisible && !generatedTextStyles(el).length && (getComputedStyle(el).visibility !== 'visible' || !textRects(el).length)) return false;
     // Boxless elements can paint text. Opacity applies only to ancestor boxes.
     for (let node: Element | null = el; node; node = node.parentElement) {
       const style = getComputedStyle(node);
-      if (style.display === 'none' || style.contentVisibility === 'hidden' || (style.display !== 'contents' && parseFloat(style.opacity) === 0)) return false;
+      if (style.display === 'none' || (style.display !== 'contents' && (style.contentVisibility === 'hidden' || parseFloat(style.opacity) === 0))) return false;
     }
     return true;
   };
