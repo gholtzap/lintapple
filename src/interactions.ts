@@ -95,7 +95,18 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
   };
   const signature = (locator: Locator) => locator.evaluate(el => {
     const properties = ['outlineStyle', 'outlineWidth', 'outlineColor', 'boxShadow', 'borderColor', 'borderWidth', 'backgroundColor', 'color', 'textDecorationLine'] as const;
-    return [null, '::before', '::after'].map(pseudo => Object.fromEntries(properties.map(key => [key, getComputedStyle(el, pseudo)[key]])));
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d');
+    return [null, '::before', '::after'].map(pseudo => {
+      const style = getComputedStyle(el, pseudo);
+      if (context) {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = style.outlineColor;
+        context.fillRect(0, 0, 1, 1);
+      }
+      return { style: Object.fromEntries(properties.map(key => [key, style[key]])), outlinePaints: !!context && context.getImageData(0, 0, 1, 1).data[3] > 0 };
+    });
   });
   for (const [index, item] of plan.focus.entries()) {
     const locator = await target(item.selector);
@@ -105,9 +116,9 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     await record('keyboard-operation', item.selector, reachable, 'not reached by Tab within the configured limit', 'the planned control to receive keyboard focus', 'Review the tab order, configured limit, and keyboard navigation.', { phase: 'tab-reachability', ...(reachable ? {} : { status: 'unresolved' }) });
     if (!reachable) { await inspect(`focus[${index}]: unreachable`); continue; }
     const after = await signature(locator);
-    const indicator = after.some((style, index) => {
-      const prior = before[index];
-      return (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0 && JSON.stringify(style) !== JSON.stringify(prior)) || (style.boxShadow !== 'none' && style.boxShadow !== prior.boxShadow) || ['borderColor', 'borderWidth', 'backgroundColor', 'color', 'textDecorationLine'].some(key => style[key] !== prior[key]);
+    const indicator = after.some(({ style, outlinePaints }, index) => {
+      const prior = before[index].style;
+      return (outlinePaints && style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0 && JSON.stringify(style) !== JSON.stringify(prior)) || (style.boxShadow !== 'none' && style.boxShadow !== prior.boxShadow) || ['borderColor', 'borderWidth', 'backgroundColor', 'color', 'textDecorationLine'].some(key => style[key] !== prior[key]);
     });
     await record('focus-visible', item.selector, indicator, 'no focus indicator detected in the computed styles', 'a visible keyboard focus indicator', 'Add a clear :focus-visible style. Review custom indicators that the checker cannot measure.', { ...(indicator ? {} : { status: 'unresolved' }), phase: 'keyboard-focus' });
     const exposure = await locator.evaluate(el => {
