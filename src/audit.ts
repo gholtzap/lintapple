@@ -173,6 +173,12 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
     const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
     const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : container instanceof SVGSVGElement ? scaleFor(container).y : 1;
+    const style = getComputedStyle(container);
+    const inline = container instanceof HTMLElement && style.display === 'inline';
+    const clientLeft = inline ? parseFloat(style.borderLeftWidth) : container.clientLeft;
+    const clientTop = inline ? parseFloat(style.borderTopWidth) : container.clientTop;
+    const clientWidth = inline ? bounds.width / scaleX - clientLeft - parseFloat(style.borderRightWidth) : container.clientWidth;
+    const clientHeight = inline ? bounds.height / scaleY - clientTop - parseFloat(style.borderBottomWidth) : container.clientHeight;
     let transform = new DOMMatrix();
     for (let node: Element | null = container; node; node = node.parentElement) {
       const style = getComputedStyle(node);
@@ -180,9 +186,9 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const [x, y = x] = style.scale === 'none' ? [1, 1] : style.scale.split(/\s+/).map(Number);
       transform = matrix.scale(x, y).multiply(transform);
     }
-    const left = transform.a < 0 ? bounds.right - (container.clientLeft + container.clientWidth) * scaleX : bounds.left + container.clientLeft * scaleX;
-    const top = transform.d < 0 ? bounds.bottom - (container.clientTop + container.clientHeight) * scaleY : bounds.top + container.clientTop * scaleY;
-    const result = { left, top, right: left + container.clientWidth * scaleX, bottom: top + container.clientHeight * scaleY };
+    const left = transform.a < 0 ? bounds.right - (clientLeft + clientWidth) * scaleX : bounds.left + clientLeft * scaleX;
+    const top = transform.d < 0 ? bounds.bottom - (clientTop + clientHeight) * scaleY : bounds.top + clientTop * scaleY;
+    const result = { left, top, right: left + clientWidth * scaleX, bottom: top + clientHeight * scaleY };
     if (!Object.values(result).every(Number.isFinite)) throw new Error('A clipping or control container must have a measurable HTML box.');
     return result;
   };
