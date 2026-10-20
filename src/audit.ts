@@ -45,7 +45,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   const checkFont = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const first = style.fontFamily.match(/^(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^,]*))/)!;
-    const family = (first[1] ?? first[2] ?? first[3]).trim().replace(/\\([\da-f]{1,6})\s?|\\(.)/gi, (_: string, hex: string | undefined, escaped: string) => hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : escaped);
+    const family = (first[1] ?? first[2] ?? first[3].trim()).replace(/\\([\da-f]{1,6})\s?|\\(.)/gi, (_: string, hex: string | undefined, escaped: string) => hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : escaped);
     if (!policy.fonts.some(font => font.toLowerCase() === family.toLowerCase()))
       add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.', undefined, { selector: `${selector(el)}${pseudo}` });
     checkFontSize(el, style, pseudo);
