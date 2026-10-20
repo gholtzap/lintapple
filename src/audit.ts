@@ -216,8 +216,10 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('nested-radius', outer, 'unequal insets or unsupported corner shapes', 'equal insets and circular pixel radii', 'Use this contract only for concentric, equally inset surfaces. Use a reasoned exception for other shapes.');
       continue;
     }
-    const expected = Math.max(0, parseFloat(outerValues[0]) * outerScale.x - insets[0]);
-    if (Math.abs(parseFloat(innerValues[0]) * innerScale.x - expected) > 1)
+    const outerRadius = Math.min(parseFloat(outerValues[0]) * outerScale.x, a.width / 2, a.height / 2);
+    const innerRadius = Math.min(parseFloat(innerValues[0]) * innerScale.x, b.width / 2, b.height / 2);
+    const expected = Math.max(0, outerRadius - insets[0]);
+    if (Math.abs(innerRadius - expected) > 1)
       add('nested-radius', inner, innerValues[0], `${Number((expected / innerScale.x).toFixed(2))}px inner radius`, 'Set the inner radius to max(0px, outer radius minus the inset). The inset includes the border.');
   }
   const styleOf = (el: Element) => styles.get(el) ?? getComputedStyle(el);
