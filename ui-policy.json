@@ -12,6 +12,7 @@
   "minControlGap": 8,
   "minControlInset": 8,
   "controlContainers": ["[data-ui-container]"],
+  "contentInsetRules": [],
   "iconSizeRules": [],
   "minLayoutGap": 8,
   "bannedCopy": ["unlock your potential", "seamlessly", "game-changing"],

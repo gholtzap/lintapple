@@ -15,6 +15,7 @@ export interface Policy {
   minControlGap: number;
   minControlInset: number;
   controlContainers: string[];
+  contentInsetRules: { selector: string; contentSelector: string; insets: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>> }[];
   iconSizeRules: { selector: string; sizes: number[] }[];
   minLayoutGap: number;
   bannedCopy: string[];
