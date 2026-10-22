@@ -95,7 +95,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       if (!item) return '';
       return item.style.display.startsWith('inline') || item.style.display === 'contents' ? item.text : `\n${item.text}\n`;
     };
-    const content = (placeholderStyle(el) ? el.getAttribute('placeholder')! : el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? (el as HTMLInputElement).value : [...el.childNodes].map(node => {
+    const content = (placeholderStyle(el) ? el.getAttribute('placeholder')! : el instanceof HTMLTextAreaElement ? el.value : el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? (el as HTMLInputElement).value : [...el.childNodes].map(node => {
       if (node.nodeType === Node.TEXT_NODE) return visible(el) ? node.textContent : '';
       if (node.nodeType !== Node.ELEMENT_NODE) return '';
       if ((node as Element).tagName === 'BR') return '\n';
