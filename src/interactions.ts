@@ -98,14 +98,22 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 1;
     const context = canvas.getContext('2d');
+    const paints = (color: string) => {
+      if (!context) return false;
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = 'transparent';
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return context.getImageData(0, 0, 1, 1).data[3] > 0;
+    };
     return [null, '::before', '::after'].map(pseudo => {
       const style = getComputedStyle(el, pseudo);
-      if (context) {
-        context.clearRect(0, 0, 1, 1);
-        context.fillStyle = style.outlineColor;
-        context.fillRect(0, 0, 1, 1);
-      }
-      return { style: Object.fromEntries(properties.map(key => [key, style[key]])), outlinePaints: !!context && context.getImageData(0, 0, 1, 1).data[3] > 0 };
+      const shadowPaints = style.boxShadow.split(/,(?![^()]*\))/).some(shadow => {
+        const color = shadow.match(/[a-z][\w-]*\([^)]*\)/i)?.[0];
+        const lengths = shadow.replace(color ?? '', '').match(/-?(?:\d*\.)?\d+(?:e[+-]?\d+)?px/gi) ?? [];
+        return !!color && lengths.some(length => parseFloat(length) !== 0) && paints(color);
+      });
+      return { style: Object.fromEntries(properties.map(key => [key, style[key]])), outlinePaints: paints(style.outlineColor), shadowPaints };
     });
   });
   for (const [index, item] of plan.focus.entries()) {
@@ -116,9 +124,9 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     await record('keyboard-operation', item.selector, reachable, 'not reached by Tab within the configured limit', 'the planned control to receive keyboard focus', 'Review the tab order, configured limit, and keyboard navigation.', { phase: 'tab-reachability', ...(reachable ? {} : { status: 'unresolved' }) });
     if (!reachable) { await inspect(`focus[${index}]: unreachable`); continue; }
     const after = await signature(locator);
-    const indicator = after.some(({ style, outlinePaints }, index) => {
+    const indicator = after.some(({ style, outlinePaints, shadowPaints }, index) => {
       const prior = before[index].style;
-      return (outlinePaints && style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0 && JSON.stringify(style) !== JSON.stringify(prior)) || (style.boxShadow !== 'none' && style.boxShadow !== prior.boxShadow) || ['borderColor', 'borderWidth', 'backgroundColor', 'color', 'textDecorationLine'].some(key => style[key] !== prior[key]);
+      return (outlinePaints && style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0 && JSON.stringify(style) !== JSON.stringify(prior)) || (shadowPaints && style.boxShadow !== prior.boxShadow) || ['borderColor', 'borderWidth', 'backgroundColor', 'color', 'textDecorationLine'].some(key => style[key] !== prior[key]);
     });
     await record('focus-visible', item.selector, indicator, 'no focus indicator detected in the computed styles', 'a visible keyboard focus indicator', 'Add a clear :focus-visible style. Review custom indicators that the checker cannot measure.', { ...(indicator ? {} : { status: 'unresolved' }), phase: 'keyboard-focus' });
     const exposure = await locator.evaluate(el => {
