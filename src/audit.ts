@@ -5,6 +5,7 @@ interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
 export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
+  for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
   const findings: Finding[] = [];
   const selector = (element: Element) => {
     const parts: string[] = [];
@@ -230,6 +231,21 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     for (const [edge, distance] of Object.entries(edgeInsets(innerBounds, el.getBoundingClientRect()))) {
       if (distance + 0.1 < policy.minControlInset)
         add('control-inset', el, `${edge} inset ${Number(distance.toFixed(2))}px`, `at least ${policy.minControlInset}px from the container's inner ${edge} edge`, 'Add container padding or correct the button position. Check absolute offsets, transforms, and negative margins.', container);
+    }
+  }
+  for (const container of elements) {
+    const rule = policy.contentInsetRules.find(rule => container.matches(rule.selector));
+    if (!rule) continue;
+    const content = [...container.querySelectorAll(rule.contentSelector)].filter(el => visible(el) && el.parentElement?.closest(rule.selector) === container);
+    if (!content.length) continue;
+    const bounds = clientBounds(container);
+    for (const el of content) {
+      const insets = edgeInsets(bounds, el.getBoundingClientRect());
+      for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
+        const minimum = rule.insets[edge];
+        if (minimum !== undefined && insets[edge] + 0.1 < minimum)
+          add('content-inset', el, `${edge} inset ${Number(insets[edge].toFixed(2))}px`, `at least ${minimum}px from the container's inner ${edge} edge`, 'Add content padding or correct the content position. Borders do not count as padding.', container);
+      }
     }
   }
   for (const outer of elements.filter(el => el.matches('[data-ui-radius]'))) {

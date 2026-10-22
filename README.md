@@ -79,6 +79,28 @@ Add these attributes for checks that need layout information:
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
 
+## Optional content insets
+
+Use `contentInsetRules` in `ui-policy.json` to check the space between a component's inner edges and selected content. The default is an empty list. No content-inset checks run until you add a rule.
+
+```json
+{
+  "contentInsetRules": [
+    {
+      "selector": ".sidebar-row",
+      "contentSelector": ".icon, .label",
+      "insets": { "left": 8, "right": 8 }
+    }
+  ]
+}
+```
+
+The first rule whose `selector` matches a container applies. `contentSelector` selects descendant element boxes. A nested container that matches the same selector owns its own content. Hidden content and selectors with no visible matches are skipped. Raw text nodes and pseudo-elements are not measured; wrap text in an element if it needs this check.
+
+Choose physical edges from `left`, `top`, `right`, and `bottom`. Values must be finite, nonnegative CSS pixel minimums. Omitted edges are not checked. The rule measures rendered distances from inside the border, with a 0.1 px tolerance. Borders do not count as padding. Transforms and absolute positions affect the measurement.
+
+A `content-inset` finding names the content element, its container, the failing edge, the measured distance, and the configured minimum. This rule does not change the existing `control-inset` check.
+
 ## Development
 
 All source, tests, examples, and build scripts use strict TypeScript. Run `npm ci`, then:
