@@ -6,7 +6,9 @@ import type { Policy, PageReport, UrlReport, InteractionPlan, FindingSummary } f
 
 // This function is compiled but never called. Invalid contracts must stay invalid.
 export function publicTypes(page: Page, frame: Frame, info: TestInfo, external: unknown) {
-  const policy: Partial<Policy> = { colorSchemes: ['light', 'dark'] };
+  const policy: Partial<Policy> = { colorSchemes: ['light', 'dark'], iconSizeRules: [{ selector: '.icon', sizes: [18] }] };
+  // @ts-expect-error Icon sizes must be numbers.
+  checkPage(page, { iconSizeRules: [{ selector: '.icon', sizes: ['18'] }] });
   const pageResult: Promise<PageReport> = checkPage(page, policy);
   const frameResult: Promise<PageReport> = checkPage(frame, policy);
   const urlResult: Promise<UrlReport> = checkUrl('https://example.test', policy);

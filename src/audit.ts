@@ -3,7 +3,7 @@ type Bounds = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>;
 interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
 // Runs in the browser. Use one report shape for all design rules.
 export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
-  for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
+  for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.iconSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   const findings: Finding[] = [];
   const selector = (element: Element) => {
@@ -118,6 +118,13 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
     if (rect.width + 0.1 < minimum || rect.height + 0.1 < minimum)
       add('control-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `at least ${minimum}px in each dimension`, 'Increase the control hit area.');
+  }
+  for (const el of elements) {
+    const rule = policy.iconSizeRules.find(rule => el.matches(rule.selector));
+    if (!rule) continue;
+    const rect = el.getBoundingClientRect();
+    if (!rule.sizes.some(size => Math.abs(rect.width - size) <= 0.1 && Math.abs(rect.height - size) <= 0.1))
+      add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
   }
   const groups = new Map<Element | null, Element[]>();
   for (const el of controls) {

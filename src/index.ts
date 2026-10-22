@@ -16,7 +16,7 @@ import { svgTextContrast } from './svg-contrast.js';
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
@@ -44,6 +44,13 @@ export function validatePolicy(input: unknown = {}): Policy {
       if (rule[key] !== undefined && (!Number.isInteger(rule[key]) || rule[key] < 1 || rule[key] > 10000)) throw new Error('Control size rule viewport bounds must be integers from 1 to 10000.');
     }
     if ((rule.minViewportWidth ?? 1) > (rule.maxViewportWidth ?? 10000)) throw new Error('Control size rule viewport bounds must be in increasing order.');
+  }
+  if (!Array.isArray(policy.iconSizeRules)) throw new Error('iconSizeRules must be a list.');
+  for (const rule of policy.iconSizeRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'sizes'].includes(key)) ||
+      typeof rule.selector !== 'string' || !rule.selector.trim() || !Array.isArray(rule.sizes) || !rule.sizes.length)
+      throw new Error('Each icon-size rule needs a selector and a nonempty size list.');
+    rule.sizes.forEach(size => positive(size, 'icon-size sizes'));
   }
   positive(policy.minLayoutGap, 'minLayoutGap');
   positive(policy.minControlInset, 'minControlInset');
