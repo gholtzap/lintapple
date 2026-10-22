@@ -16,7 +16,7 @@ import { svgTextContrast } from './svg-contrast.js';
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
@@ -44,6 +44,17 @@ export function validatePolicy(input: unknown = {}): Policy {
       if (rule[key] !== undefined && (!Number.isInteger(rule[key]) || rule[key] < 1 || rule[key] > 10000)) throw new Error('Control size rule viewport bounds must be integers from 1 to 10000.');
     }
     if ((rule.minViewportWidth ?? 1) > (rule.maxViewportWidth ?? 10000)) throw new Error('Control size rule viewport bounds must be in increasing order.');
+  }
+  if (!Array.isArray(policy.contentInsetRules)) throw new Error('contentInsetRules must be a list.');
+  for (const rule of policy.contentInsetRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'contentSelector', 'insets'].includes(key)) ||
+      typeof rule.selector !== 'string' || !rule.selector.trim() || typeof rule.contentSelector !== 'string' || !rule.contentSelector.trim() ||
+      !rule.insets || typeof rule.insets !== 'object' || Array.isArray(rule.insets) || !Object.keys(rule.insets).length)
+      throw new Error('Each content-inset rule needs selector, contentSelector, and a nonempty insets object.');
+    for (const [edge, value] of Object.entries<unknown>(rule.insets)) {
+      if (!['left', 'top', 'right', 'bottom'].includes(edge) || typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+        throw new Error('Content-inset edges must be left, top, right, or bottom with finite nonnegative pixel values.');
+    }
   }
   positive(policy.minLayoutGap, 'minLayoutGap');
   positive(policy.minControlInset, 'minControlInset');
