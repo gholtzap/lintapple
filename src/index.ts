@@ -16,7 +16,7 @@ import { svgTextContrast } from './svg-contrast.js';
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
@@ -55,6 +55,13 @@ export function validatePolicy(input: unknown = {}): Policy {
       if (!['left', 'top', 'right', 'bottom'].includes(edge) || typeof value !== 'number' || !Number.isFinite(value) || value < 0)
         throw new Error('Content-inset edges must be left, top, right, or bottom with finite nonnegative pixel values.');
     }
+  }
+  if (!Array.isArray(policy.iconSizeRules)) throw new Error('iconSizeRules must be a list.');
+  for (const rule of policy.iconSizeRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'sizes'].includes(key)) ||
+      typeof rule.selector !== 'string' || !rule.selector.trim() || !Array.isArray(rule.sizes) || !rule.sizes.length)
+      throw new Error('Each icon-size rule needs a selector and a nonempty size list.');
+    rule.sizes.forEach(size => positive(size, 'icon-size sizes'));
   }
   positive(policy.minLayoutGap, 'minLayoutGap');
   positive(policy.minControlInset, 'minControlInset');

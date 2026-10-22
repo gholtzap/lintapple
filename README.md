@@ -101,6 +101,25 @@ Choose physical edges from `left`, `top`, `right`, and `bottom`. Values must be 
 
 A `content-inset` finding names the content element, its container, the failing edge, the measured distance, and the configured minimum. This rule does not change the existing `control-inset` check.
 
+## Optional icon sizes
+
+Use `iconSizeRules` in `ui-policy.json` to require specific sizes for selected icons. The default is an empty list. No icon-size checks run until you add a rule.
+
+```json
+{
+  "iconSizeRules": [
+    { "selector": ".sidebar-row .icon", "sizes": [18] },
+    { "selector": ".toolbar .icon", "sizes": [16, 20] }
+  ]
+}
+```
+
+The first rule whose `selector` matches a visible element applies. Each size is a positive, finite CSS pixel value for a square icon. Both rendered dimensions must match the same allowed size, with a 0.1 px tolerance. A list of `[16, 20]` allows 16 by 16 px or 20 by 20 px, not 16 by 20 px.
+
+The check measures element boxes, including borders and transforms. It works with selected SVG, image, and HTML elements. It does not measure the artwork inside an SVG view box or a pseudo-element. Hidden elements and selectors with no visible matches are skipped. Do not select rectangular icons unless they must use a square box.
+
+An `icon-size` finding includes the measured width and height and the configured sizes. Icon sizes do not change the minimum control hit area. An 18 px icon can sit inside a larger button.
+
 ## Development
 
 All source, tests, examples, and build scripts use strict TypeScript. Run `npm ci`, then:
