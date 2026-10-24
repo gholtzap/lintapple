@@ -79,6 +79,16 @@ Add these attributes for checks that need layout information:
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
 
+## Automatic tooltip checks
+
+CLI and `checkUrl` scans open declared tooltips on hover and keyboard focus. They check the rendered page in each open state and check Escape dismissal and focus retention. While the hover tooltip is open, they resize to the other configured viewports. A tooltip can close on resize; if it stays open, it must fit. Resize findings retain the actual screen size.
+
+Triggers are discovered through `aria-describedby` references to existing `role="tooltip"` elements, or through `data-ui-tooltip` IDs. A `data-ui-tooltip` target can be created when the tooltip opens. Scans use hover, Tab, and Escape; they do not click triggers or submit forms. Explicit tooltip plans take priority for their triggers. Automatic discovery runs after the supplied interaction plan, on the resulting page state.
+
+`accessibilityCoverage.tooltips` lists automatically checked triggers and unmeasured cases. Native `title` tooltips, disabled or unreachable triggers, duplicate IDs, and tooltip elements without a visible declared trigger are reported as unmeasured. Scans check at most 100 declared tooltip relationships per page. These coverage limits alone do not change the exit code. Tooltips that fail to open on hover or focus, or fail to close on Escape, produce findings.
+
+An unmarked trigger whose tooltip does not exist until it opens cannot be discovered. Use an explicit interaction plan for it. `checkPage` and `expectUI` remain passive: open the tooltip in your test before calling them. Child frames still need separate checks.
+
 ## Control content insets
 
 Buttons and custom dropdown controls are checked by default. Their visible text and DOM icons (`svg`, `img`, and `canvas`) need at least 8 px from the inner left and right borders. The check uses rendered text ranges and icon boxes, including transformed and absolute content. It does not require contract attributes. It does not apply to general containers.

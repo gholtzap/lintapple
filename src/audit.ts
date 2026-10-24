@@ -339,7 +339,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     let containingBlock: Element | null = null;
     let overlay = false;
     for (let node: Element | null = el; node; node = node.parentElement) {
-      overlay ||= styleOf(node).position === 'fixed' || node.matches('dialog[open], [role="dialog"], [role="alertdialog"], [data-ui-overlay]');
+      overlay ||= styleOf(node).position === 'fixed' || node.matches('dialog[open], [role="dialog"], [role="alertdialog"], [role="tooltip"], [data-ui-overlay]');
       // Overflow below an absolute box's containing block cannot clip that box.
       if (containingBlock && node !== containingBlock) continue;
       ancestors.push(node);

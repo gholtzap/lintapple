@@ -25,6 +25,7 @@ export interface Policy {
 }
 export type Status = 'passed' | 'failed' | 'unresolved';
 export interface FindingDetails {
+  viewport?: Policy['viewports'][number];
   selector?: string;
   relatedSelector?: string;
   status?: Status;
@@ -52,7 +53,8 @@ export interface Finding extends FindingDetails {
 }
 export interface SuppressedFinding { rule: RuleId; selector: string; reason: string; state?: string }
 export interface InteractionCheck extends FindingDetails { rule: RuleId; selector: string; status: Status }
-export interface AccessibilityCoverage { pageRules: RuleId[]; interactionRules: string; interactions?: InteractionCheck[] }
+export interface TooltipCoverage { checked: { trigger: string; tooltip: string }[]; unmeasured: { selector: string; reason: string }[] }
+export interface AccessibilityCoverage { tooltips?: TooltipCoverage; pageRules: RuleId[]; interactionRules: string; interactions?: InteractionCheck[] }
 export interface FrameLocation { url: string; name: string; path: string }
 export interface FrameCoverage {
   checked: FrameLocation;
@@ -83,7 +85,7 @@ export interface PageReport {
   alignmentGroups: number;
   radiusContracts: number;
 }
-export interface StateReport extends PageReport { name: string; url: string }
+export interface StateReport extends PageReport { name: string; url: string; viewport?: Policy['viewports'][number] }
 export interface InteractionReport { findings: Finding[]; suppressed: SuppressedFinding[]; checks: InteractionCheck[]; states: StateReport[] }
 export interface UrlReport {
   summary: FindingSummary;
