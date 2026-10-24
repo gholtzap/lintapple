@@ -61,6 +61,7 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
     for (const el of elements) {
       for (const attr of ['aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns', 'aria-activedescendant', 'aria-details', 'aria-errormessage', 'aria-flowto']) {
         if (!el.hasAttribute(attr)) continue;
+        if (attr === 'aria-errormessage' && (el.getAttribute('aria-invalid') ?? 'false').toLowerCase() === 'false') continue;
         // A collapsed popup can create its controlled element only when opened.
         if (attr === 'aria-controls' && el.getAttribute('aria-expanded') === 'false') continue;
         const ids = el.getAttribute(attr)!.trim().split(/\s+/).filter(Boolean);
