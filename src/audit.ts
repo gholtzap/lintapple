@@ -327,7 +327,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('nested-radius', inner, innerValues[0], `${Number((expected / innerScale.x).toFixed(2))}px inner radius`, 'Set the inner radius to max(0px, outer radius minus the inset). The inset includes the border.');
   }
   const styleOf = (el: Element) => styles.get(el) ?? getComputedStyle(el);
-  const scrolls = (node: Element, axis: 'X' | 'Y') => !['inline', 'contents'].includes(styleOf(node).display) && /^(auto|scroll)$/.test(styleOf(node)[`overflow${axis}`]);
+  const scrolls = (node: Element, axis: 'X' | 'Y') => node.clientWidth > 0 && node.clientHeight > 0 && !['inline', 'contents'].includes(styleOf(node).display) && /^(auto|scroll)$/.test(styleOf(node)[`overflow${axis}`]);
   const scrollsWithin = (ancestors: Element[], clip: Pick<Clip, 'element' | 'bounds'>, axis: 'X' | 'Y') => {
     for (const node of ancestors) {
       if (node === clip.element || !clip.element.contains(node)) break;
@@ -359,7 +359,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const paint = /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
       const overflowX = paint && style.overflowX === 'visible' ? 'clip' : style.overflowX;
       const overflowY = paint && style.overflowY === 'visible' ? 'clip' : style.overflowY;
-      return { element: node, overflowX, overflowY, x: /^(hidden|clip)$/.test(overflowX), y: /^(hidden|clip)$/.test(overflowY) };
+      return { element: node, overflowX, overflowY, x: /^(hidden|clip)$/.test(overflowX) || /^(auto|scroll)$/.test(overflowX) && !scrolls(node, 'X'), y: /^(hidden|clip)$/.test(overflowY) || /^(auto|scroll)$/.test(overflowY) && !scrolls(node, 'Y') };
     }).filter(clip => clip.x || clip.y).map(clip => {
       const style = styleOf(clip.element);
       const value = style.overflowClipMargin;
