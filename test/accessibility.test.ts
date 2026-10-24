@@ -14,7 +14,7 @@ import { createDemoServer } from '../demo/server.js';
 
 const shell = (content: string) => `<html lang="en"><style>
 html { background: white; color: black; font: 16px system-ui; }
-body { margin: 24px; } button, input, select { font: inherit; min-height: 32px; margin: 8px; }
+body { margin: 24px; } [role="button"] { padding: 0 8px; } button, input, select { font: inherit; min-height: 32px; margin: 8px; padding: 0 8px; }
 button:focus-visible { outline: 3px solid blue; outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 </style><body>${content}</body></html>`;

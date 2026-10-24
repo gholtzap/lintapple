@@ -152,7 +152,7 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
           accessibilityCoverage.interactions = interaction.checks;
           accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : interaction.states.length ? 'not tested: page-state actions only' : 'not tested: empty interaction plan';
         }
-        report.runs.push({ viewport, colorScheme, frameCoverage: result.frameCoverage, elements: result.elements, controls: result.controls, insetControls: result.insetControls, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
+        report.runs.push({ viewport, colorScheme, frameCoverage: result.frameCoverage, elements: result.elements, controls: result.controls, insetControls: result.insetControls, controlContentCoverage: result.controlContentCoverage, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
         report.findings.push(...findings.map(f => ({ ...f, viewport, colorScheme })));
       } finally { await context.close(); }
     }

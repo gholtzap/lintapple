@@ -29,9 +29,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
   let controls: Element[];
+  let dropdownControls: Element[];
   contrast.setup(document);
   try {
     controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
+    dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
   const isText = (el: Element) => textRects(el).length > 0 || el.matches('input, textarea, select');
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
@@ -240,20 +242,65 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         add('control-inset', el, `${edge} inset ${Number(distance.toFixed(2))}px`, `at least ${policy.minControlInset}px from the container's inner ${edge} edge`, 'Add container padding or correct the button position. Check absolute offsets, transforms, and negative margins.', container);
     }
   }
+  const checkContentInsets = (container: Element, content: Element, rects: Bounds[], insets: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>>) => {
+    const bounds = clientBounds(container);
+    for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
+      const minimum = insets[edge];
+      const distance = Math.min(...rects.map(rect => edgeInsets(bounds, rect)[edge]));
+      if (minimum !== undefined && distance + 0.1 < minimum)
+        add('content-inset', content, `${edge} inset ${Number(distance.toFixed(2))}px`, `at least ${minimum}px from the container's inner ${edge} edge`, 'Add content padding or correct the content position. Borders do not count as padding.', container);
+    }
+  };
+  const controlContentCoverage: PageReport['controlContentCoverage'] = { checked: 0, unmeasured: [] };
+  const contentControls = new Set([...controls, ...dropdownControls]);
   for (const container of elements) {
     const rule = policy.contentInsetRules.find(rule => container.matches(rule.selector));
-    if (!rule) continue;
-    const content = [...container.querySelectorAll(rule.contentSelector)].filter(el => visible(el) && el.parentElement?.closest(rule.selector) === container);
-    if (!content.length) continue;
-    const bounds = clientBounds(container);
-    for (const el of content) {
-      const insets = edgeInsets(bounds, el.getBoundingClientRect());
-      for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
-        const minimum = rule.insets[edge];
-        if (minimum !== undefined && insets[edge] + 0.1 < minimum)
-          add('content-inset', el, `${edge} inset ${Number(insets[edge].toFixed(2))}px`, `at least ${minimum}px from the container's inner ${edge} edge`, 'Add content padding or correct the content position. Borders do not count as padding.', container);
-      }
+    let customContent = 0;
+    if (rule) {
+      const content = [...container.querySelectorAll(rule.contentSelector)].filter(el => visible(el) && el.parentElement?.closest(rule.selector) === container);
+      customContent = content.length;
+      for (const el of content) checkContentInsets(container, el, [el.getBoundingClientRect()], rule.insets);
     }
+    if (!contentControls.has(container)) continue;
+    const reasons = new Set<string>();
+    const box = container.getBoundingClientRect();
+    if (!box.width || !box.height) reasons.add('The control has no measurable box.');
+    else if (container.matches('select')) reasons.add('Native select label and arrow have no separate DOM boxes.');
+    else if (container.matches('input')) reasons.add('Native input content has no separate DOM box.');
+    else if (!rule) {
+      let measured = false;
+      for (const el of [container, ...container.querySelectorAll('*')]) {
+        if (!visible(el)) continue;
+        // Nested controls and popup content do not belong to this control's label.
+        const popup = el.closest('[role="listbox"], [role="menu"], [role="dialog"]');
+        if (el !== container && (contentControls.has(el) || (popup && container.contains(popup)))) continue;
+        let owner = el.parentElement;
+        while (owner && owner !== container && !contentControls.has(owner)) owner = owner.parentElement;
+        if (el !== container && owner !== container) continue;
+        if (el.closest('svg') && !el.matches('svg')) continue;
+        const style = getComputedStyle(el);
+        let clipped = false;
+        for (let node: Element | null = el; node; node = node.parentElement) {
+          const item = getComputedStyle(node);
+          if (item.clip !== 'auto' || item.clipPath !== 'none') { clipped = true; break; }
+          if (node === container) break;
+        }
+        if (clipped) { reasons.add('Clipped control content needs visual review.'); continue; }
+        const rects = el.matches('svg, img, canvas') ? [el.getBoundingClientRect()] : textRects(el);
+        if (rects.length) {
+          checkContentInsets(container, el, rects, { left: 8, right: 8 });
+          measured = true;
+        }
+        if (style.backgroundImage !== 'none' || ['::before', '::after'].some(pseudo => {
+          const item = getComputedStyle(el, pseudo);
+          return item.content !== 'none' && item.content !== 'normal' && item.display !== 'none' && item.visibility === 'visible' && parseFloat(item.opacity) > 0;
+        })) reasons.add('CSS images and generated content have no separate DOM boxes.');
+      }
+      if (measured) controlContentCoverage.checked++;
+      else reasons.add('No measurable control text or icon.');
+    } else if (customContent) controlContentCoverage.checked++;
+    else reasons.add('The content-inset rule has no matching content.');
+    for (const reason of reasons) controlContentCoverage.unmeasured.push({ selector: selector(container), reason });
   }
   for (const outer of elements.filter(el => el.matches('[data-ui-radius]'))) {
     const inner = [...outer.children].find(el => el.matches('[data-ui-radius-inner]') && visible(el));
@@ -500,5 +547,5 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   } finally { contrast.teardown(); }
   const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
-  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }
