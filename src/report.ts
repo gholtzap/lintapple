@@ -56,5 +56,5 @@ export function formatControlContentCoverage(coverages: readonly import('./types
 export function formatTooltipCoverage(coverages: readonly (import('./types.js').TooltipCoverage | undefined)[]): string {
   const checked = coverages.reduce((count, coverage) => count + (coverage?.checked.length ?? 0), 0);
   const unmeasured = new Set(coverages.flatMap(coverage => (coverage?.unmeasured ?? []).map(item => `${item.selector}: ${item.reason}`)));
-  return [`Tooltip states: ${checked} declared trigger checks completed.`, ...(unmeasured.size ? ['Unmeasured tooltip states:', ...unmeasured] : [])].join('\n');
+  return [`Automatic tooltip states: ${checked} declared trigger checks completed.`, ...(unmeasured.size ? ['Unmeasured tooltip states:', ...unmeasured] : [])].join('\n');
 }
