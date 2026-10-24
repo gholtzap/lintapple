@@ -30,16 +30,29 @@ export function validateWidgets(plan: InteractionPlan) {
   }
 }
 
+// ARIA ownership can place widget children outside the DOM subtree.
+function widgetElements(root: Element): Element[] {
+  const elements = new Set<Element>();
+  const visit = (el: Element | null) => {
+    if (!el || elements.has(el)) return;
+    elements.add(el);
+    for (const child of el.children) visit(child);
+    for (const id of (el.getAttribute('aria-owns') ?? '').split(/\s+/).filter(Boolean)) visit(document.getElementById(id));
+  };
+  visit(root);
+  return [...elements];
+}
+
 // The same focus contract supports direct focus and aria-activedescendant.
-function hasFocus(selector: string) {
+function hasFocus({ selector, tree }: { selector: string; tree: typeof widgetElements }) {
   const elements = document.querySelectorAll(selector), active = document.activeElement;
   if (elements.length > 1) throw new Error(`Interaction selector must match one element: ${selector}`);
   const el = elements[0];
   if (!el || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) || !el.getBoundingClientRect().width || !el.getBoundingClientRect().height || el.closest('[inert]')) return false;
-  return active === el || (active?.contains(el) && el.id && active.getAttribute('aria-activedescendant') === el.id);
+  return active === el || (active && tree(active).includes(el) && el.id && active.getAttribute('aria-activedescendant') === el.id);
 }
 
-function widgetState({ selector, kind, selected, checked = [], visibility }: { selector: string; kind: 'tabs' | 'menus'; selected?: string; checked?: CheckedState[]; visibility: Visibility }) {
+function widgetState({ selector, kind, selected, checked = [], visibility, tree }: { selector: string; kind: 'tabs' | 'menus'; selected?: string; checked?: CheckedState[]; visibility: Visibility; tree: typeof widgetElements }) {
   const root = document.querySelector(selector), errors: string[] = [];
   if (!root) return kind === 'menus' && !checked.length ? [] : ['The declared widget or checked states are absent.'];
   if (!(kind === 'tabs' ? root.getAttribute('role') === 'tablist' : ['menu', 'menubar'].includes(root?.getAttribute('role') ?? ''))) return ['The widget role changed or is invalid.'];
@@ -59,11 +72,11 @@ function widgetState({ selector, kind, selected, checked = [], visibility }: { s
       if (value === 'true' && !visible(tab)) errors.push('The selected tab is not visible.');
     }
   } else {
-    const items = [...root.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="separator"]')];
+    const items = tree(root).filter(el => el !== root && el.matches('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="separator"]'));
     if (!items.some(el => el.getAttribute('role') !== 'separator')) errors.push('The menu has no items.');
     const groups = new Map<Element | null, number>(), separators = new Map<Element | null, Element>();
     for (const el of items) {
-      const menu = el.closest('[role="menu"], [role="menubar"]');
+      const menu = el.closest('[role="menu"], [role="menubar"]') ?? root;
       if (el.getAttribute('role') === 'separator') { separators.set(menu, el); continue; }
       const role = el.getAttribute('role'), value = el.getAttribute('aria-checked');
       if (['menu', 'true'].includes(el?.getAttribute('aria-haspopup') ?? '')) {
@@ -83,7 +96,7 @@ function widgetState({ selector, kind, selected, checked = [], visibility }: { s
     if ([...groups.values()].some(count => count > 1)) errors.push('A menu radio group has more than one checked item.');
     for (const state of checked) {
       const el = document.querySelector(state.selector);
-      if (!el || !root.contains(el) || !['menuitemradio', 'menuitemcheckbox'].includes(el?.getAttribute('role') ?? '') || el.getAttribute('aria-checked') !== String(state.value)) errors.push(`The checked state does not match ${state.selector}: ${state.value}.`);
+      if (!el || !items.includes(el) || !['menuitemradio', 'menuitemcheckbox'].includes(el?.getAttribute('role') ?? '') || el.getAttribute('aria-checked') !== String(state.value)) errors.push(`The checked state does not match ${state.selector}: ${state.value}.`);
     }
   }
   return errors;
@@ -112,12 +125,14 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
     const validRole = kind === 'tabs' ? role === 'tablist' : item.open ? role === 'menu' : ['menu', 'menubar'].includes(role ?? '');
     await record('control-state', item.selector, validRole, `widget role is ${role}`, kind === 'tabs' ? 'role="tablist"' : item.open ? 'role="menu"' : 'role="menu" or "menubar"', 'Use the correct widget role.', { phase: 'widget-role' });
     if (!validRole) continue;
+    const tree = await page.evaluateHandle<typeof widgetElements>(`(${widgetElements.toString()})`);
+    const focus = await page.evaluateHandle<typeof hasFocus>(`(${hasFocus.toString()})`);
     const stateHandle = await page.evaluateHandle<typeof widgetState>(`(${widgetState.toString()})`);
     const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
     try {
       // A handle keeps the app's global objects unchanged.
       const checkState = async (phase: string, step: Partial<WidgetStep> = {}) => {
-        const witness = { selector: item.selector, kind, selected: step.selected, checked: step.checked, visibility };
+        const witness = { selector: item.selector, kind, selected: step.selected, checked: step.checked, visibility, tree };
         const passed = await wait(({ fn, witness }) => fn(witness).length === 0, { fn: stateHandle, witness });
         const errors = passed ? [] : await page.evaluate(widgetState, witness);
         await record('control-state', item.selector, passed, errors.join(' ') || 'widget state did not settle within the configured limit', 'valid widget selection and linked content', 'Update the declared selection, checked states, and panel visibility together.', { phase, ...(!passed && !errors.length ? { status: 'unresolved' } : {}) });
@@ -132,20 +147,20 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
       };
       await checkState('widget-baseline');
       if (item.open) {
-        const entered = await wait(({ selector, last }) => {
+        const entered = await wait(({ selector, last, tree }) => {
           const root = document.querySelector(selector)!, active = document.activeElement;
-          const items = [...root.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]')].filter(el => el.closest('[role="menu"], [role="menubar"]') === root && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+          const items = tree(root).filter(el => el !== root && el.matches('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]')).filter(el => (el.closest('[role="menu"], [role="menubar"]') ?? root) === root && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
           const expected = last ? items.at(-1) : items[0];
           return !!expected && (active === expected || (active === root && expected.id && root.getAttribute('aria-activedescendant') === expected.id));
-        }, { selector: item.selector, last: item.openKey === 'ArrowUp' });
+        }, { selector: item.selector, last: item.openKey === 'ArrowUp', tree });
         await record('keyboard-operation', item.selector, entered, 'menu opening did not focus its entry item', 'focus on the first item, or the last item for ArrowUp', 'Move focus into the menu when it opens.', { phase: 'menu-entry' });
         if (!entered) continue;
       }
-      const entry = await root.evaluate((el, kind) => {
+      const entry = await root.evaluate((el, { kind, tree }) => {
         const active = document.activeElement;
-        const items = [...el.querySelectorAll(kind === 'tabs' ? '[role="tab"]' : '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]')].filter(child => child.closest('[role="tablist"], [role="menu"], [role="menubar"]') === el && child.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+        const items = tree(el).filter(child => child !== el && child.matches(kind === 'tabs' ? '[role="tab"]' : '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]')).filter(child => (child.closest('[role="tablist"], [role="menu"], [role="menubar"]') ?? el) === el && child.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
         return { active: items.includes(active!) || (active === el && items.some(child => child.id === el.getAttribute('aria-activedescendant'))) };
-      }, kind);
+      }, { kind, tree });
       if (!item.open && !entry.active) {
         let entryTarget = root;
         if (!await root.evaluate(el => (el as HTMLElement).tabIndex >= 0 || el.hasAttribute('aria-activedescendant'))) {
@@ -174,7 +189,7 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
         }
         if (kind === 'tabs' && ['Enter', 'Space'].includes(step.key)) {
           const same = await page.evaluate(({ focus, selected }) => document.querySelector(focus) === document.querySelector(selected ?? ''), { focus: step.focus, selected: step.selected });
-          if (!same || !await page.evaluate(hasFocus, step.selected!)) throw new Error('Tab activation needs the focused tab as its selected target.');
+          if (!same || !await page.evaluate(hasFocus, { selector: step.selected!, tree })) throw new Error('Tab activation needs the focused tab as its selected target.');
         }
         if (kind === 'menus' && ['Enter', 'Space'].includes(step.key)) {
           const choice = await page.evaluate(({ checked, focus }) => {
@@ -188,7 +203,7 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
           if (!choice.disabled && choice.role === 'menuitemradio' && choice.expected !== true) throw new Error('Menu radio activation needs a true checked state.');
           if (choice.role === 'menuitem' && !choice.disabled && !step.outcome && !(choice.submenu && choice.next)) throw new Error('A menu action needs a declared outcome or submenu focus target.');
         }
-        const previousChoices = kind === 'menus' && !['Enter', 'Space'].includes(step.key) ? await root.evaluateHandle(el => [...el.querySelectorAll('[role="menuitemcheckbox"], [role="menuitemradio"]')].map(el => ({ el, value: el.getAttribute('aria-checked') }))) : null;
+        const previousChoices = kind === 'menus' && !['Enter', 'Space'].includes(step.key) ? await root.evaluateHandle((el, tree) => tree(el).filter(child => child.matches('[role="menuitemcheckbox"], [role="menuitemradio"]')).map(el => ({ el, value: el.getAttribute('aria-checked') })), tree) : null;
         const closingMenu = kind === 'menus' && ['Escape', 'Tab', 'Shift+Tab'].includes(step.key) ? await page.evaluateHandle(({ selector, key }) => {
           const root = document.querySelector(selector)!, active = document.activeElement;
           const el = active?.getAttribute('aria-activedescendant') ? document.getElementById(active.getAttribute('aria-activedescendant')!) : active;
@@ -197,7 +212,7 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
         }, { selector: item.selector, key: step.key }) : null;
         try {
           await page.keyboard.press(step.key);
-          const moved = await wait(hasFocus, step.focus);
+          const moved = await wait(({ fn, selector, tree }) => fn({ selector, tree }), { fn: focus, selector: step.focus, tree });
           await record('keyboard-operation', item.selector, moved, `${step.key} did not focus ${step.focus}`, `${step.key} to focus ${step.focus}`, 'Handle the declared key and update focus or aria-activedescendant.', { phase, focusSelector: step.focus });
           await checkState(phase, step);
           if (closingMenu) {
@@ -216,17 +231,17 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
             await record('keyboard-operation', item.selector, status === 'passed', status === 'unresolved' ? 'the removed submenu has no stable ID to check its replacement' : 'the exit key left the menu open', `${step.key} to close the menu`, 'Close the menu and put focus on the declared return control. Give replaced submenus stable IDs.', { phase, status });
           }
           if (previousChoices) {
-            const unchanged = await page.evaluate(({ states, selector }) => {
+            const unchanged = await page.evaluate(({ states, selector, tree }) => {
               const root = document.querySelector(selector);
               if (!root) return 'passed';
               let status: Status = 'passed';
               for (const { el, value } of states) {
                 const current = el.isConnected ? el : el.id ? document.getElementById(el.id) : null;
-                if (!current || !root.contains(current)) status = 'unresolved';
+                if (!current || !tree(root).includes(current)) status = 'unresolved';
                 else if (current.getAttribute('aria-checked') !== value) return 'failed';
               }
               return status;
-            }, { states: previousChoices, selector: item.selector });
+            }, { states: previousChoices, selector: item.selector, tree });
             await record('control-state', item.selector, unchanged === 'passed', unchanged === 'unresolved' ? 'navigation replaced choices without stable IDs' : 'navigation changed a menu choice', 'navigation to keep checked states unchanged', 'Change menu choices only on activation. Give replaced choices stable IDs.', { phase, status: unchanged });
           }
           if (step.outcome) await record('keyboard-operation', item.selector, await wait(matches, { selector: step.outcome, text: step.expectedText }), 'menu action did not produce the declared result', `text "${step.expectedText}" at ${step.outcome}`, 'Connect the menu action to the declared result.', { phase, outcomeSelector: step.outcome });
@@ -235,6 +250,6 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
           if (!moved) break;
         } finally { if (previousChoices) await previousChoices.dispose(); if (closingMenu) await closingMenu.dispose(); }
       }
-    } finally { await Promise.all([stateHandle.dispose(), visibility.dispose()]); }
+    } finally { await Promise.all([stateHandle.dispose(), visibility.dispose(), tree.dispose(), focus.dispose()]); }
   }
 }
