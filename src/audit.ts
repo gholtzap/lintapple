@@ -18,7 +18,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     return parts.join(' > ');
   };
   const add: AddFinding = (rule, element, actual, expected, fix, related, details = {}) => {
-    const exception = policy.exceptions.find(e => e.rules.includes(rule) && element.matches(e.selector));
+    const pseudo = details.selector?.match(/::[\w-]+$/)?.[0];
+    const exception = policy.exceptions.find(e => e.rules.includes(rule) && (element.matches(e.selector) || !!pseudo && e.selector.endsWith(pseudo) && element.matches(e.selector.slice(0, -pseudo.length))));
     if (exception) { suppressed.push({ rule, selector: selector(element), reason: exception.reason }); return; }
     findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
