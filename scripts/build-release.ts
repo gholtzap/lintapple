@@ -1,17 +1,23 @@
 import { cp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname, basename, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = await realpath(fileURLToPath(new URL('../../', import.meta.url)));
 const output = join(root, 'dist');
 const stage = resolve(process.argv[2] || join(root, 'test-results/production-stage'));
-const existingStage = await realpath(stage).catch((error: NodeJS.ErrnoException) => {
-  if (error.code !== 'ENOENT') throw error;
-  return undefined;
-});
-if (existingStage === root) throw new Error('Use a separate directory for the release.');
+const canonical = async (path: string): Promise<string> => {
+  try { return await realpath(path); }
+  catch (error) {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error;
+    return join(await canonical(dirname(path)), basename(path));
+  }
+};
+const destination = await canonical(stage);
+const within = (parent: string, child: string) => { const path = relative(parent, child); return !path || path !== '..' && !path.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(path); };
+if (within(destination, root) || ['dist', 'src', 'scripts', 'demo', 'examples', 'node_modules'].some(input => within(join(root, input), destination)))
+  throw new Error('Use a separate directory for the release.');
 const pkg: { version: string } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 execFileSync(process.execPath, [join(output, 'scripts/highlight-demo.js')], { cwd: root });
 await mkdir(join(stage, 'downloads'), { recursive: true });
