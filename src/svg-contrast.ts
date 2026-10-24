@@ -23,6 +23,8 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
         [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) &&
         el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && el.getBoundingClientRect().width > 0).map(el => {
         const style = getComputedStyle(el), bounds = el.getBoundingClientRect();
+        const matrix = el.getScreenCTM();
+        const size = parseFloat(style.fontSize) * (matrix ? Math.min(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d)) : 1);
         let reason: string | null = null;
         if (!/^(rgb|hsl|color\(|#[\da-f]|[a-z]+$)/i.test(style.fill) || style.fill.startsWith('url(') || style.fill === 'none' || style.stroke !== 'none') reason = 'SVG text needs a solid fill without a stroke';
         for (let node: Element | null = el; node; node = node.parentElement) {
@@ -35,7 +37,7 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
         const declarations = Array.from(el.style, property => ({ property, value: el.style.getPropertyValue(property), priority: el.style.getPropertyPriority(property) }));
         return { el, selector: selector(el), originalStyle: el.getAttribute('style'), declarations, painted: false, reason,
           rgba: [...rgba.slice(0, 3), alpha], rect: { x: bounds.x + scrollX, y: bounds.y + scrollY, width: bounds.width, height: bounds.height },
-          required: parseFloat(style.fontSize) >= 24 || parseFloat(style.fontSize) >= 56 / 3 && parseFloat(style.fontWeight) >= 700 ? 3 : 4.5 };
+          required: size >= 24 || size >= 56 / 3 && parseFloat(style.fontWeight) >= 700 ? 3 : 4.5 };
       });
       const box = svg.getBoundingClientRect();
       const clip = { x: Math.max(0, Math.floor(box.x + scrollX)), y: Math.max(0, Math.floor(box.y + scrollY)), width: Math.ceil(box.width), height: Math.ceil(box.height) };
