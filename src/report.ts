@@ -25,9 +25,11 @@ export function summarizeFindings(findings: readonly (Finding & { viewport?: Pol
   return { occurrences: findings.length, problems: groups.size, failed: findings.length - unresolved, unresolved, byRule: [...byRule.values()], groups: [...groups.values()] };
 }
 
+const terminalText = (value: string) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+
 export function formatSummary(summary: FindingSummary): string {
   const unique = (values: (string | undefined)[]) => [...new Set(values.filter((value): value is string => value !== undefined))].join(', ');
-  return [
+  return terminalText([
     `${summary.problems} distinct problems, ${summary.occurrences} occurrences: ${summary.failed} failed, ${summary.unresolved} unresolved.`,
     ...summary.byRule.map(count => `${count.rule}: ${count.problems} problems, ${count.failed} failed, ${count.unresolved} unresolved.`),
     ...summary.groups.map(({ finding: f, occurrences }) => {
@@ -36,7 +38,7 @@ export function formatSummary(summary: FindingSummary): string {
       const schemes = unique(occurrences.map(item => item.colorScheme));
       return `\n${f.rule} (${f.status === 'unresolved' ? 'unresolved' : 'failed'}; ${occurrences.length} occurrences)\n${f.documentUrl ? `${f.documentUrl}\n` : ''}${f.framePath ? `Frame: ${f.framePath}\n` : ''}${f.selector}${f.relatedSelector ? `; related: ${f.relatedSelector}` : ''}${f.phase ? `\nPhase: ${f.phase}` : ''}\n${occurrences.length > 1 ? 'Example: ' : ''}${f.message}\n${[states && `States: ${states}`, screens && `Screens: ${screens}`, schemes && `Themes: ${schemes}`].filter(Boolean).join('\n')}\nFix: ${f.fix}`;
     }),
-  ].join('\n');
+  ].join('\n'));
 }
 
 export function formatFrameCoverage(coverages: readonly FrameCoverage[]): string {
@@ -45,10 +47,10 @@ export function formatFrameCoverage(coverages: readonly FrameCoverage[]): string
     lines.add(`Checked document: ${coverage.checked.url} (frame: ${coverage.checked.path}; name: ${JSON.stringify(coverage.checked.name)}).`);
     for (const frame of coverage.omitted) lines.add(`Omitted child frame: ${frame.url} (frame: ${frame.path}; name: ${JSON.stringify(frame.name)}; checked document: ${coverage.checked.url}).`);
   }
-  return ['Frame coverage: only the listed documents were checked. Child frames need separate checkPage calls.', ...lines].join('\n');
+  return terminalText(['Frame coverage: only the listed documents were checked. Child frames need separate checkPage calls.', ...lines].join('\n'));
 }
 
 export function formatControlContentCoverage(coverages: readonly import('./types.js').PageReport['controlContentCoverage'][]): string {
   const lines = new Set(coverages.flatMap(coverage => coverage.unmeasured.map(item => `${item.selector}: ${item.reason}`)));
-  return [`Control content: ${coverages.reduce((sum, coverage) => sum + coverage.checked, 0)} control checks with measurable content.`, ...(lines.size ? ['Unmeasured control content:', ...lines] : [])].join('\n');
+  return terminalText([`Control content: ${coverages.reduce((sum, coverage) => sum + coverage.checked, 0)} control checks with measurable content.`, ...(lines.size ? ['Unmeasured control content:', ...lines] : [])].join('\n'));
 }
