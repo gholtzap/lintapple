@@ -44,7 +44,7 @@ export async function scanTooltips(page: Page, policy: Policy, checkPage: (page:
       const name = (state: string) => state.replace('tooltips[0]', `automatic tooltips[${index}]`);
       report.findings.push(...result.findings.map(finding => ({ ...finding, ...(finding.state ? { state: name(finding.state) } : {}), ...(finding.phase === 'tooltip-baseline' ? { status: 'unresolved' as const } : {}) })));
       report.suppressed.push(...result.suppressed.map(finding => ({ ...finding, ...(finding.state ? { state: name(finding.state) } : {}) })));
-      report.checks.push(...result.checks.map(check => ({ ...check, ...(check.phase === 'tooltip-baseline' ? { status: 'unresolved' as const } : {}) }))); 
+      report.checks.push(...result.checks.map(check => ({ ...check, ...(check.phase === 'tooltip-baseline' ? { status: 'unresolved' as const } : {}) })));
       report.states.push(...result.states.map(state => ({ ...state, name: name(state.name) })));
       if (['hover', 'focus'].every(phase => result.checks.some(check => check.phase === phase && check.status === 'passed'))) coverage.checked.push(item);
       else coverage.unmeasured.push({ selector: item.trigger, reason: result.checks.some(check => check.phase === 'tooltip-baseline') ? 'The tooltip was already open before interaction checks.' : 'The tooltip did not open for both hover and keyboard focus.' });
