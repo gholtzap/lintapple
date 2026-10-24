@@ -312,7 +312,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const outerValues = corners.map(key => String(styles.get(outer)![key]));
     const innerValues = corners.map(key => String(getComputedStyle(inner)[key]));
     const outerScale = scaleFor(outer), innerScale = scaleFor(inner);
-    if ([outerScale, innerScale].some(scale => !Number.isFinite(scale.x) || !Number.isFinite(scale.y) || Math.abs(scale.x - scale.y) > 0.01) || insets.some(n => n < 0 || Math.abs(n - insets[0]) > 1) || [...outerValues, ...innerValues].some(n => !/^\d+(?:\.\d+)?px$/.test(n)) || new Set(outerValues).size !== 1 || new Set(innerValues).size !== 1) {
+    const round = [outer, inner].every(el => ['top-left', 'top-right', 'bottom-right', 'bottom-left'].every(corner => {
+      const shape = getComputedStyle(el).getPropertyValue(`corner-${corner}-shape`);
+      return !shape || shape === 'round' || shape === 'superellipse(1)';
+    }));
+    if (!round || [outerScale, innerScale].some(scale => !Number.isFinite(scale.x) || !Number.isFinite(scale.y) || Math.abs(scale.x - scale.y) > 0.01) || insets.some(n => n < 0 || Math.abs(n - insets[0]) > 1) || [...outerValues, ...innerValues].some(n => !/^\d+(?:\.\d+)?px$/.test(n)) || new Set(outerValues).size !== 1 || new Set(innerValues).size !== 1) {
       add('nested-radius', outer, 'unequal insets or unsupported corner shapes', 'equal insets and circular pixel radii', 'Use this contract only for concentric, equally inset surfaces. Use a reasoned exception for other shapes.');
       continue;
     }
