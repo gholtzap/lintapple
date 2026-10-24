@@ -150,10 +150,10 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
         const entered = await wait(({ selector, last, tree }) => {
           const root = document.querySelector(selector)!, active = document.activeElement;
           const items = tree(root).filter(el => el !== root && el.matches('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]')).filter(el => (el.closest('[role="menu"], [role="menubar"]') ?? root) === root && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
-          const expected = last ? items.at(-1) : items[0];
-          return !!expected && (active === expected || (active === root && expected.id && root.getAttribute('aria-activedescendant') === expected.id));
+          const selected = items.find(el => el.getAttribute('role') === 'menuitemradio' && el.getAttribute('aria-checked') === 'true');
+          return [selected, last ? items.at(-1) : items[0]].some(expected => !!expected && (active === expected || (active === root && expected.id && root.getAttribute('aria-activedescendant') === expected.id)));
         }, { selector: item.selector, last: item.openKey === 'ArrowUp', tree });
-        await record('keyboard-operation', item.selector, entered, 'menu opening did not focus its entry item', 'focus on the first item, or the last item for ArrowUp', 'Move focus into the menu when it opens.', { phase: 'menu-entry' });
+        await record('keyboard-operation', item.selector, entered, 'menu opening did not focus its entry item', 'focus on the checked radio item, the first item, or the last item for ArrowUp', 'Move focus into the menu when it opens.', { phase: 'menu-entry' });
         if (!entered) continue;
       }
       const entry = await root.evaluate((el, { kind, tree }) => {
