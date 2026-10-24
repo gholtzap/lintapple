@@ -79,9 +79,17 @@ Add these attributes for checks that need layout information:
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
 
-## Optional content insets
+## Control content insets
 
-Use `contentInsetRules` in `ui-policy.json` to check the space between a component's inner edges and selected content. The default is an empty list. No content-inset checks run until you add a rule.
+Buttons and custom dropdown controls are checked by default. Their visible text and DOM icons (`svg`, `img`, and `canvas`) need at least 8 px from the inner left and right borders. The check uses rendered text ranges and icon boxes, including transformed and absolute content. It does not require contract attributes. It does not apply to general containers.
+
+Native select arrows and labels, native input content, CSS images, generated content, and clipped content cannot be fully measured by this check. `controlContentCoverage.unmeasured` lists these limits. CLI text reports show them, and `expectUI` saves a coverage attachment. An unmeasured item is not a spacing pass; it needs visual review. Coverage limits alone do not change the exit code.
+
+Use a DOM icon to make arrow spacing measurable. A matching `contentInsetRules` entry replaces the automatic check for that control and can set component-specific edges and minimums. Existing `content-inset` exceptions also apply to automatic findings.
+
+## Custom content insets
+
+Use `contentInsetRules` in `ui-policy.json` to check the space between a component's inner edges and selected content. The default list is empty. Controls still receive the automatic check described above.
 
 ```json
 {

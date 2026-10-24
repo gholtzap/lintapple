@@ -7,7 +7,7 @@ test('popup reference review is resolved only for unique menu targets', async ()
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
-    const shell = (content: string) => `<html lang="en"><style>html{font:16px system-ui;background:white;color:black}button{font:inherit;min-height:32px;margin:8px}</style><body>${content}</body></html>`;
+    const shell = (content: string) => `<html lang="en"><style>html{font:16px system-ui;background:white;color:black}button{font:inherit;min-height:32px;margin:8px;padding:0 8px}</style><body>${content}</body></html>`;
     for (const expanded of ['true', 'false']) {
       await page.setContent(shell(`<button aria-haspopup="menu" aria-expanded="${expanded}" aria-controls="menu">Actions</button><div id="menu" role="menu" ${expanded === 'false' ? 'hidden' : ''}><button role="menuitem">Save</button></div>`));
       const result = await checkPage(page);

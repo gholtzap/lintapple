@@ -78,6 +78,7 @@ export interface PageReport {
   elements: number;
   controls: number;
   insetControls: number;
+  controlContentCoverage: { checked: number; unmeasured: { selector: string; reason: string }[] };
   numericElements: number;
   alignmentGroups: number;
   radiusContracts: number;

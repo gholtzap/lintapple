@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { validateInteractions } from '../src/interactions.js';
 import { checkUrl, validatePolicy } from '../src/index.js';
 import { initProject, loadProjectPolicy, parseJson } from '../src/project.js';
-import { formatSummary, formatFrameCoverage } from '../src/report.js';
+import { formatSummary, formatFrameCoverage, formatControlContentCoverage } from '../src/report.js';
 import { formatCliError } from '../src/cli-error.js';
 
 const usage = `Usage: lintapple <url> [--config path] [--ready selector] [--interactions path] [--json]
@@ -53,6 +53,7 @@ try {
     const count = report.runs.reduce((sum, run) => sum + run.states.length, 0);
     console.log(`${report.findings.length ? 'Failed' : 'Passed'} across ${count} page checks. ${formatSummary(report.summary)}`);
     console.log(formatFrameCoverage(report.runs.flatMap(run => run.states.map(state => state.frameCoverage))));
+    console.log(formatControlContentCoverage(report.runs.flatMap(run => run.states.map(state => state.controlContentCoverage))));
     const suppressed = report.runs.reduce((sum, run) => sum + run.suppressed.length, 0);
     if (suppressed) console.log(`\n${suppressed} findings excluded by policy. See the JSON report for reasons.`);
   }

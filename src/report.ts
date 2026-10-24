@@ -47,3 +47,8 @@ export function formatFrameCoverage(coverages: readonly FrameCoverage[]): string
   }
   return ['Frame coverage: only the listed documents were checked. Child frames need separate checkPage calls.', ...lines].join('\n');
 }
+
+export function formatControlContentCoverage(coverages: readonly import('./types.js').PageReport['controlContentCoverage'][]): string {
+  const lines = new Set(coverages.flatMap(coverage => coverage.unmeasured.map(item => `${item.selector}: ${item.reason}`)));
+  return [`Control content: ${coverages.reduce((sum, coverage) => sum + coverage.checked, 0)} control checks with measurable content.`, ...(lines.size ? ['Unmeasured control content:', ...lines] : [])].join('\n');
+}
