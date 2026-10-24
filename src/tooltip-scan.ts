@@ -42,12 +42,12 @@ export async function scanTooltips(page: Page, policy: Policy, checkPage: (page:
     try {
       const result = await runInteractions(page, { tooltips: [item], ...(explicit.timeout ? { timeout: explicit.timeout } : {}), ...(explicit.maxTabStops ? { maxTabStops: explicit.maxTabStops } : {}) }, policy, checkPage, createVisibility);
       const name = (state: string) => state.replace('tooltips[0]', `automatic tooltips[${index}]`);
-      report.findings.push(...result.findings.map(finding => ({ ...finding, ...(finding.state ? { state: name(finding.state) } : {}) })));
+      report.findings.push(...result.findings.map(finding => ({ ...finding, ...(finding.state ? { state: name(finding.state) } : {}), ...(finding.phase === 'tooltip-baseline' ? { status: 'unresolved' as const } : {}) })));
       report.suppressed.push(...result.suppressed.map(finding => ({ ...finding, ...(finding.state ? { state: name(finding.state) } : {}) })));
-      report.checks.push(...result.checks);
+      report.checks.push(...result.checks.map(check => ({ ...check, ...(check.phase === 'tooltip-baseline' ? { status: 'unresolved' as const } : {}) }))); 
       report.states.push(...result.states.map(state => ({ ...state, name: name(state.name) })));
       if (['hover', 'focus'].every(phase => result.checks.some(check => check.phase === phase && check.status === 'passed'))) coverage.checked.push(item);
-      else coverage.unmeasured.push({ selector: item.trigger, reason: 'The tooltip did not open for both hover and keyboard focus.' });
+      else coverage.unmeasured.push({ selector: item.trigger, reason: result.checks.some(check => check.phase === 'tooltip-baseline') ? 'The tooltip was already open before interaction checks.' : 'The tooltip did not open for both hover and keyboard focus.' });
     } catch (error) {
       if (!(error instanceof Error) || !(error.name === 'TimeoutError' || /Interaction selector must match/.test(error.message))) throw error;
       coverage.unmeasured.push({ selector: item.trigger, reason: 'The declared tooltip could not be reached or matched. Use an explicit interaction plan.' });

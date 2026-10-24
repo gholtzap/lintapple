@@ -117,3 +117,15 @@ test('automatic scans preserve explicit tooltip plans and do not activate action
     await writeFile(resolve(directory, 'no-activation.json'), JSON.stringify({ mutations, report: automatic }, null, 2));
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+test('an already open tooltip is unmeasured instead of a confirmed interaction failure', async () => {
+  await mkdir(directory, { recursive: true });
+  const file = resolve(directory, 'already-open.html');
+  await writeFile(file, fixture('good').replace('role="tooltip" hidden', 'role="tooltip"'));
+  const report = await checkUrl(pathToFileURL(file).href, { viewports: [{ width: 390, height: 844 }] });
+  assert.ok(report.findings.some(item => item.phase === 'tooltip-baseline' && item.status === 'unresolved'));
+  assert.equal(report.findings.filter(item => item.status !== 'unresolved').length, 0);
+  assert.equal(report.runs[0]!.accessibilityCoverage.tooltips!.checked.length, 0);
+  assert.match(report.runs[0]!.accessibilityCoverage.tooltips!.unmeasured[0]!.reason, /already open/);
+  await writeFile(resolve(directory, 'already-open.json'), JSON.stringify(report, null, 2));
+});
