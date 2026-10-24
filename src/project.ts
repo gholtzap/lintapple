@@ -1,5 +1,5 @@
 import type { Policy } from './types.js';
-import { readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { readFile, writeFile, rename, rm, stat, chmod } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { defaultPolicy, validatePolicy } from './index.js';
 
@@ -24,6 +24,7 @@ export async function loadProjectPolicy(path?: string): Promise<Partial<Policy>>
 
 export async function initProject() {
   const original = await readFile('package.json', 'utf8');
+  const originalMode = (await stat('package.json')).mode & 0o777;
   const input = parseJson(original, 'package.json');
   const pkg = input as { [key: string]: unknown; scripts?: Record<string, unknown> };
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) throw new Error('package.json must be an object.');
@@ -40,6 +41,7 @@ export async function initProject() {
     const temporary = `.lintapple-${randomUUID()}.tmp`;
     try {
       await writeFile(temporary, `${JSON.stringify(pkg, null, 2)}\n`, { flag: 'wx' });
+      await chmod(temporary, originalMode);
       if (await readFile('package.json', 'utf8') !== original) throw new Error('package.json changed during setup. Run lintapple init again.');
       await rename(temporary, 'package.json');
     } finally { await rm(temporary, { force: true }); }
