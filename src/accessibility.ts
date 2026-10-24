@@ -89,7 +89,9 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
       const tooltip = ids.map(id => document.getElementById(id)).find(node => node?.getAttribute('role') === 'tooltip' && node.textContent?.trim());
       if (!tooltip) add('icon-button-tooltip', el, 'no linked text tooltip', 'a text tooltip for a button without a visible text label', 'Give the button an accessible name. Connect a role="tooltip" element with aria-describedby or data-ui-tooltip, and show it on hover and keyboard focus.', null, { status: 'failed', category: 'design' });
     }
+    const nativeModal = document.elementFromPoint(0, 0)?.closest('dialog:modal');
     for (const dialog of elements.filter(el => el.matches('dialog:modal, [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]'))) {
+      if (nativeModal && dialog !== nativeModal && !nativeModal.contains(dialog)) continue;
       if (!dialog.contains(document.activeElement)) add('dialog-focus', dialog, 'focus outside the open modal', 'focus inside the open modal', 'Move focus into the modal when it opens. Test focus containment and return with an interaction plan.', null, { status: 'failed', category: 'accessibility' });
     }
   } finally { engine.teardown(); }
