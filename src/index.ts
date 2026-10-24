@@ -10,6 +10,7 @@ import { finding, summarizeFindings } from './report.js';
 export { summarizeFindings } from './report.js';
 import { runInteractions, validateInteractions } from './interactions.js';
 import { createVisibility } from './visibility.js';
+import { scanTooltips } from './tooltip-scan.js';
 import { svgTextContrast } from './svg-contrast.js';
 
 // Load the module export without assigning the app's global property.
@@ -152,8 +153,17 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
           accessibilityCoverage.interactions = interaction.checks;
           accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : interaction.states.length ? 'not tested: page-state actions only' : 'not tested: empty interaction plan';
         }
+        const automatic = await scanTooltips(page, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility, interactions);
+        findings.push(...automatic.findings);
+        suppressed.push(...automatic.suppressed);
+        states.push(...automatic.states);
+        accessibilityCoverage.tooltips = automatic.coverage;
+        if (automatic.checks.length) {
+          accessibilityCoverage.interactions = [...(accessibilityCoverage.interactions ?? []), ...automatic.checks];
+          accessibilityCoverage.interactionRules = 'only listed interactions and declared tooltip states tested';
+        }
         report.runs.push({ viewport, colorScheme, frameCoverage: result.frameCoverage, elements: result.elements, controls: result.controls, insetControls: result.insetControls, controlContentCoverage: result.controlContentCoverage, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
-        report.findings.push(...findings.map(f => ({ ...f, viewport, colorScheme })));
+        report.findings.push(...findings.map(f => ({ ...f, viewport: f.viewport ?? viewport, colorScheme })));
       } finally { await context.close(); }
     }
     report.summary = summarizeFindings(report.findings);
