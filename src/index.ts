@@ -25,16 +25,16 @@ export function validatePolicy(input: unknown = {}): Policy {
   const policy = { ...structuredClone(defaultPolicy), ...input } as Policy;
   for (const key of Object.keys(input)) if (!(key in defaultPolicy)) throw new Error(`Unknown policy field: ${key}`);
   const strings = (value: unknown, name: string, nonempty = true) => {
-    if (!Array.isArray(value) || (nonempty && !value.length) || value.some((v: unknown) => typeof v !== 'string' || !v.trim())) throw new Error(`${name} must be a list of nonempty strings.`);
+    if (!Array.isArray(value) || (nonempty && !value.length) || [...value].some((v: unknown) => typeof v !== 'string' || !v.trim())) throw new Error(`${name} must be a list of nonempty strings.`);
   };
   const positive = (value: number, name: string) => { if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number.`); };
   strings(policy.fonts, 'fonts'); strings(policy.bannedCopy, 'bannedCopy', false);
   if (!Array.isArray(policy.fontSizes) || !policy.fontSizes.length) throw new Error('fontSizes must be a nonempty list.');
-  policy.fontSizes.forEach(n => positive(n, 'fontSizes'));
+  for (const n of policy.fontSizes) positive(n, 'fontSizes');
   if (!Array.isArray(policy.typeRules)) throw new Error('typeRules must be a list.');
   for (const rule of policy.typeRules) {
     if (!rule || Object.keys(rule).some(k => !['selector', 'sizes'].includes(k)) || typeof rule.selector !== 'string' || !rule.selector.trim() || !Array.isArray(rule.sizes) || !rule.sizes.length) throw new Error('Each type rule needs a selector and a nonempty size list.');
-    rule.sizes.forEach(n => positive(n, 'typeRules sizes'));
+    for (const n of rule.sizes) positive(n, 'typeRules sizes');
   }
   positive(policy.minControlSize, 'minControlSize'); positive(policy.minControlGap, 'minControlGap');
   if (!Array.isArray(policy.controlSizeRules)) throw new Error('controlSizeRules must be a list.');
@@ -62,14 +62,14 @@ export function validatePolicy(input: unknown = {}): Policy {
     if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'sizes'].includes(key)) ||
       typeof rule.selector !== 'string' || !rule.selector.trim() || !Array.isArray(rule.sizes) || !rule.sizes.length)
       throw new Error('Each icon-size rule needs a selector and a nonempty size list.');
-    rule.sizes.forEach(size => positive(size, 'icon-size sizes'));
+    for (const size of rule.sizes) positive(size, 'icon-size sizes');
   }
   positive(policy.minLayoutGap, 'minLayoutGap');
   positive(policy.minControlInset, 'minControlInset');
   strings(policy.controlContainers, 'controlContainers');
   if (!Array.isArray(policy.viewports) || !policy.viewports.length) throw new Error('viewports must be a nonempty list.');
   for (const v of policy.viewports) if (!v || Object.keys(v).some(k => !['width', 'height'].includes(k)) || !Number.isInteger(v.width) || !Number.isInteger(v.height) || v.width < 1 || v.height < 1 || v.width > 10000 || v.height > 10000) throw new Error('Each viewport needs integer width and height from 1 to 10000.');
-  if (!Array.isArray(policy.colorSchemes) || !policy.colorSchemes.length || policy.colorSchemes.some(s => !['light', 'dark'].includes(s))) throw new Error('colorSchemes must contain light or dark.');
+  if (!Array.isArray(policy.colorSchemes) || !policy.colorSchemes.length || [...policy.colorSchemes].some(s => !['light', 'dark'].includes(s))) throw new Error('colorSchemes must contain light or dark.');
   if (!Array.isArray(policy.exceptions)) throw new Error('exceptions must be a list.');
   for (const e of policy.exceptions) {
     if (!e || Object.keys(e).some(k => !['selector', 'rules', 'reason'].includes(k)) || typeof e.selector !== 'string' || !e.selector.trim() || typeof e.reason !== 'string' || !e.reason.trim()) throw new Error('Each exception needs a selector, rules, and a reason.');
