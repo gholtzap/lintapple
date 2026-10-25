@@ -39,7 +39,7 @@ test('a checkout with spaces builds a complete release with verified package and
     const alias = join(directory, 'source alias');
     await symlink(checkout, alias, 'junction');
     await assert.rejects(execute(process.execPath, [join(checkout, 'dist/scripts/build-release.js'), alias], { cwd: checkout, env }), /Use a separate directory/);
-    assert.ok((await readFile(join(checkout, 'demo/app.ts'), 'utf8')).includes('setPreviewState'));
+    assert.equal(await readFile(join(checkout, 'demo/app.ts'), 'utf8'), await readFile(join(root, 'demo/app.ts'), 'utf8'));
     await mkdir(join(root, 'test-results'), { recursive: true });
     await writeFile(join(root, 'test-results/release-build.json'), JSON.stringify({ sourceCommit, files: Object.keys(release.hashes).length, packageIntegrity: release.packageIntegrity, pathWithSpaces: true }, null, 2));
   } finally { await rm(directory, { recursive: true, force: true }); }

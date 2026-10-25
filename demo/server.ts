@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, extname, sep } from 'node:path';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const types: Record<string, string> = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };
+const types: Record<string, string> = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml' };
 const vendorFiles = new Map(['lenis.mjs', 'lenis.css'].map(name => [`/demo/vendor/${name}`, resolve(root, '../node_modules/lenis/dist', name)]));
 
 export function createDemoServer() {

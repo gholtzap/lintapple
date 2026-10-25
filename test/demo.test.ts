@@ -34,12 +34,34 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
         await page.goto(`${origin}/demo/specimen.html?rule=${rule.id}&state=${state}&theme=${theme}`);
         await page.locator('body[data-ready="true"]').waitFor();
         assert.equal((await page.locator('.specimen').boundingBox())!.width, Math.min(224, viewport.width - 32), `${rule.id} must use the shared example width.`);
+        if (rule.id === 'viewport-bounds') await page.getByRole('link', { name: 'Download', exact: true }).hover();
         const report = await checkPage(page);
         const name = `${rule.id}, ${state}, ${theme}, ${viewport.width}px`;
         if (state === 'before' && rule.id === 'content-overflow' && !await page.locator('.project-name').evaluate(el => el.scrollWidth > el.clientWidth)) assert.deepEqual(report.findings, [], `${name} must pass when the text fits.`);
         else if (state === 'before') assert.ok(report.findings.some(finding => finding.rule === rule.id), `${name} must fail its named rule: ${JSON.stringify(report.findings)}`);
         else assert.deepEqual(report.findings, [], `${name}: ${JSON.stringify(report.findings)}`);
         examples.push({ rule: rule.id, state, theme, viewport, ...report });
+        if (rule.id === 'viewport-bounds') {
+          await page.keyboard.press('Escape');
+          assert.equal(await page.getByRole('tooltip').isVisible(), false);
+          if (state === 'after') {
+            await page.mouse.move(-1, -1);
+            await page.keyboard.press('Tab');
+            await page.getByRole('tooltip').waitFor();
+            const focused = await checkPage(page, policy);
+            assert.deepEqual(focused.findings, []);
+            examples.push({ rule: rule.id, state, interaction: 'focus', theme, viewport, ...focused });
+            if (viewport.width === 390 && theme === 'light') {
+              const narrow = { width: 248, height: 180 };
+              await page.setViewportSize(narrow);
+              await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+              const resized = await checkPage(page, policy);
+              assert.deepEqual(resized.findings, []);
+              examples.push({ rule: rule.id, state, interaction: 'resize', theme, viewport: narrow, ...resized });
+              await page.setViewportSize(viewport);
+            }
+          }
+        }
         if (rule.id === 'control-size') {
           await mkdir(new URL('../../test-results/', import.meta.url), { recursive: true });
           if (state === 'after' && viewport.width >= 390) await page.screenshot({ path: new URL(`../test-results/button-surface-${theme}-${viewport.width}.jpg`, import.meta.url).pathname });
@@ -79,6 +101,14 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
         if (theme === 'light') await page.getByRole('button', { name: 'Use light theme' }).click();
         assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
         for (const src of await page.locator('iframe').evaluateAll(frames => frames.map(frame => frame!.getAttribute('src')))) assert.match(src!, new RegExp(`theme=${theme}`));
+        const tooltipCard = page.locator('[data-rule="viewport-bounds"]');
+        const initialTooltip = tooltipCard.locator('iframe').contentFrame().getByRole('tooltip');
+        await tooltipCard.scrollIntoViewIfNeeded();
+        await initialTooltip.waitFor();
+        assert.ok(await initialTooltip.evaluate(el => el.getBoundingClientRect().left < 0), 'The gallery must show Before without a preview click or hover.');
+        await page.keyboard.press('Escape');
+        assert.equal(await initialTooltip.isVisible(), false);
+        await page.evaluate(() => window.scrollTo(0, 0));
         await clean(`Index before, ${theme}, ${viewport.width}px`);
         const about = page.locator('.sidebar nav > a');
         assert.equal(await about.getAttribute('aria-current'), 'page');
@@ -134,6 +164,12 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
           const detail = page.locator('article.detail');
           const frame = await (await detail.locator('iframe').elementHandle())!.contentFrame();
           await frame!.locator('body[data-ready="true"]').waitFor();
+          if (rule.id === 'viewport-bounds') {
+            await frame!.getByRole('tooltip').waitFor();
+            await frame!.locator('.label').hover();
+            await frame!.locator('.specimen').hover({ position: { x: 1, y: 1 } });
+            assert.equal(await frame!.getByRole('tooltip').isVisible(), true, 'Pointer movement outside the tooltip and its trigger must keep the preview open.');
+          }
           const detailIdentity = await frame!.evaluate(() => window.previewIdentity = crypto.randomUUID());
           assert.equal(await page.locator('.report, .report-list, .finding-note, [data-copy]').count(), 0);
           assert.doesNotMatch(await detail.innerText(), /Before check results|Recorded at|Check this example|localhost:4173|Loading check results/);
@@ -149,6 +185,34 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
             assert.equal(await detail.locator(`[data-state="${state}"]`).getAttribute('aria-pressed'), 'true');
             assert.equal(await detail.locator('[aria-pressed="true"]').count(), 1);
             assert.match((await detail.locator('iframe').getAttribute('title'))!, new RegExp(`: ${state}$`));
+            if (rule.id === 'viewport-bounds') {
+              const tooltip = frame!.getByRole('tooltip');
+              await tooltip.waitFor();
+              const left = await tooltip.evaluate(el => el.getBoundingClientRect().left);
+              assert.ok(state === 'before' ? left < 0 : left >= 0, 'The tooltip must show the selected state without hover.');
+              assert.equal(await frame!.locator('.tooltip-example').evaluate(el => el.getBoundingClientRect().left), 16);
+              const toggle = detail.getByRole('button', { name: state === 'before' ? 'Before' : 'After', exact: true });
+              await toggle.press('Escape');
+              assert.equal(await tooltip.isVisible(), false);
+              await toggle.click();
+              await tooltip.waitFor();
+            }
+            if (rule.id === 'content-inset' && state === 'after') {
+              const summary = frame!.locator('summary');
+              await summary.press('Enter');
+              await frame!.getByRole('button', { name: 'Documents', exact: true }).click();
+              assert.equal(await summary.innerText(), 'Documents');
+              assert.equal(await frame!.locator('details').getAttribute('open'), null);
+              await summary.press('Enter');
+              assert.deepEqual((await checkPage(frame!, policy)).findings, []);
+              await summary.press('Escape');
+              assert.equal(await frame!.locator('details').getAttribute('open'), null);
+              const center = await frame!.locator('.product').evaluate(el => {
+                const box = el.getBoundingClientRect();
+                return { x: box.left + box.width / 2 - innerWidth / 2, y: box.top + box.height / 2 - innerHeight / 2 };
+              });
+              assert.ok(Math.abs(center.x) < 1 && Math.abs(center.y) < 1, 'The closed dropdown example must stay centered.');
+            }
             if (rule.id === 'control-size') {
               const row = (await frame!.locator('.control-row').boundingBox())!;
               const button = (await frame!.locator('.remove-button').boundingBox())!;
