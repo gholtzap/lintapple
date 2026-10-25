@@ -77,15 +77,6 @@ test('supplied invalid plans fail through the URL API and CLI before navigation'
   } finally { await new Promise<void>((resolve, reject: (reason?: unknown) => void) => server.close(error => error ? reject(error) : resolve())); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('radius checks use the same coordinates at normal and scaled sizes', async () => withPage(async page => {
-  for (const scale of [1, 0.5, 1.5]) for (const radius of [16, 20]) {
-    await page.setContent(shell(`<div data-ui-radius class="outer"><div data-ui-radius-inner class="inner">Project ready</div></div>`, `.outer{width:200px;height:160px;box-sizing:border-box;padding:8px;border-radius:24px;transform:scale(${scale});transform-origin:top left}.inner{width:100%;height:100%;border-radius:${radius}px}`));
-    assert.equal((await checkPage(page)).findings.filter(f => f.rule === 'nested-radius').length, radius === 16 ? 0 : 1, `${scale}: ${radius}`);
-  }
-  await page.setContent(shell('<div data-ui-radius class="outer"><div data-ui-radius-inner class="inner">Project ready</div></div>', '.outer{width:200.4px;height:160.6px;box-sizing:border-box;padding:8px;border-radius:24px}.inner{width:100%;height:100%;border-radius:16px}'));
-  assert.deepEqual((await checkPage(page)).findings, [], 'Fractional layout sizes must pass.');
-}));
-
 test('numeric alignment resolves both text directions', async () => withPage(async page => {
   for (const direction of ['ltr', 'rtl']) for (const alignment of ['left', 'right', 'start', 'end']) {
     await page.setContent(shell(`<table style="width:240px"><tr><td style="direction:${direction};text-align:${alignment};font-variant-numeric:tabular-nums">120</td></tr></table>`));

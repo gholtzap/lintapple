@@ -13,7 +13,7 @@ let lenis: Lenis;
 const escape = (value: string) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 const icon = (name: DemoRule['group']) => `<svg viewBox="0 0 24 24" aria-hidden="true">${({ Typography: '<path d="M4 5h16M12 5v14M8 19h8"/>', Layout: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M4 11h16M11 11v9"/>', Color: '<circle cx="12" cy="12" r="8"/><path d="M12 4v16"/>', Content: '<path d="M5 6h14M5 12h10M5 18h14"/>' })[name]}</svg>`;
 const frameURL = (id: string, state: ExampleState) => `specimen.html?rule=${id}&state=${state}&theme=${theme}`;
-const preview = (rule: DemoRule, state: ExampleState, loading = 'lazy') => `<iframe class="preview${['font-size', 'content-overflow'].includes(rule.id) ? ' screen-preview' : ''}${rule.id === 'content-overflow' ? ' resize-preview' : ''}" src="${frameURL(rule.id, state)}" title="${escape(rule.title)}: ${state}" loading="${loading}"></iframe>`;
+const preview = (rule: DemoRule, state: ExampleState, loading = 'lazy') => `<iframe class="preview${['font-size', 'content-overflow', 'content-inset'].includes(rule.id) ? ' screen-preview' : ''}${rule.id === 'content-overflow' ? ' resize-preview' : ''}" src="${frameURL(rule.id, state)}" title="${escape(rule.title)}: ${state}" loading="${loading}"></iframe>`;
 const stateControls = (state: ExampleState) => `<div class="state-controls ui-actions" data-ui-actions data-ui-container>${['before', 'after'].map(value => `<button type="button" data-state="${value}" aria-pressed="${value === state}">${value === 'before' ? 'Before' : 'After'}</button>`).join('')}</div>`;
 
 function navigation(id?: string) {
@@ -62,7 +62,7 @@ function detail(rule: DemoRule) {
   const state = states.get(rule.id)!;
   return `<article class="detail ui-stack" data-ui-stack data-rule="${rule.id}">
     <a class="back-link" href="#/">← About</a>
-    <div class="detail-intro ui-stack" data-ui-stack><h1>${escape(rule.title)}</h1><p>${escape(rule.summary)}</p></div>
+    <div class="detail-intro ui-stack" data-ui-stack><h1>${escape(rule.title)}</h1><p>${escape(rule.summary)}</p>${rule.note ? `<p>${escape(rule.note)}</p>` : ''}</div>
     <section class="comparison ui-stack" data-ui-stack>${preview(rule, state, 'eager')}${stateControls(state)}</section>
     <section class="ui-stack" data-ui-stack><h2>The fix</h2>${highlightedCode[rule.fix]}</section>
   </article>`;
@@ -74,6 +74,8 @@ function render() {
   const rule = rules.find(entry => entry.id === id);
   document.querySelector('.sidebar')!.innerHTML = navigation(id);
   main.innerHTML = `<details class="mobile-nav"><summary>Browse rules</summary>${navigation(id)}</details>${id ? rule ? detail(rule) : '<div class="empty ui-stack" data-ui-stack><h1>Rule not found</h1><a href="#/">Return to About</a></div>' : gallery()}`;
+  const tooltipExample = main.querySelector<HTMLElement>('[data-rule="viewport-bounds"]');
+  if (tooltipExample) setPreviewState(tooltipExample, states.get('viewport-bounds')!);
   document.title = rule ? `${rule.title} — lintapple` : 'lintapple — It should be impossible for AI to make a bad UI.';
   document.body.dataset.ready = 'true';
   lenis?.resize();
@@ -90,6 +92,9 @@ function setPreviewState(example: HTMLElement, state: ExampleState) {
   example.querySelectorAll<HTMLElement>('[data-state]').forEach(control => control.setAttribute('aria-pressed', String(control.dataset.state === state)));
 }
 
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') for (const frame of main.querySelectorAll('iframe')) frame.contentWindow?.dismissExampleTooltip?.();
+});
 main.addEventListener('click', async event => {
   const button = (event.target as Element).closest('button');
   if (!button) return;

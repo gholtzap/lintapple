@@ -1,6 +1,6 @@
 import type { ExampleState } from './types.js';
 import { rules } from './rules.js';
-import './tooltips.js';
+import { openTooltip, closeTooltip } from './tooltips.js';
 
 const params = new URLSearchParams(location.search);
 const rule = rules.find(item => item.id === params.get('rule'));
@@ -34,14 +34,32 @@ if (!rule || (state !== 'before' && state !== 'after') || (theme !== 'light' && 
     history.replaceState(null, '', `?${params}`);
   };
   applyState();
+  const filter = specimen.querySelector<HTMLDetailsElement>('.file-filter');
+  filter?.addEventListener('click', event => {
+    const option = (event.target as Element).closest('button');
+    if (!option) return;
+    filter.querySelector('summary span')!.textContent = option.textContent;
+    filter.open = false;
+    filter.querySelector('summary')!.focus();
+  });
+  filter?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { filter.open = false; filter.querySelector('summary')!.focus(); }
+  });
+  const revealTooltip = () => {
+    const trigger = specimen.querySelector<HTMLElement>('#download-trigger');
+    if (trigger) openTooltip(trigger);
+  };
+  window.dismissExampleTooltip = closeTooltip;
   window.setExampleState = nextState => {
-    if (!['before', 'after'].includes(nextState) || nextState === selectedState) return;
+    if (!['before', 'after'].includes(nextState)) return;
+    if (nextState === selectedState) { revealTooltip(); return; }
     selectedState = nextState;
     transition?.skipTransition();
+    const update = () => { applyState(); revealTooltip(); };
     if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      transition = document.startViewTransition(applyState);
+      transition = document.startViewTransition(update);
       transition.ready.catch(() => {});
-    } else applyState();
+    } else update();
   };
   if (rule.id === 'content-overflow') {
     specimen.setAttribute('data-ui-stack', '');
