@@ -29,6 +29,11 @@ test('a checkout with spaces builds a complete release with verified package and
     assert.equal(release.sourceCommit, sourceCommit);
     for (const [path, expected] of Object.entries(release.hashes))
       assert.equal(createHash('sha256').update(await readFile(join(stage, path))).digest('hex'), expected, path);
+    const routes: { rewrites: { source: string; destination: string }[]; redirects: { source: string; destination: string }[] } = JSON.parse(await readFile(join(stage, 'vercel.json'), 'utf8'));
+    assert.ok(routes.rewrites.some(route => route.source === '/rule/:id' && route.destination === '/demo/index.html'));
+    assert.ok(routes.redirects.some(route => route.source === '/demo/:path*' && route.destination === '/:path*'));
+    assert.match(await readFile(join(stage, 'demo/index.html'), 'utf8'), /<base href="\/">/);
+    assert.match(await readFile(join(checkout, 'demo/index.html'), 'utf8'), /<base href="\/demo\/">/);
     const packed = await readFile(join(stage, release.package));
     assert.equal(`sha512-${createHash('sha512').update(packed).digest('base64')}`, release.packageIntegrity);
     for (const path of ['demo/index.html', 'demo/app.js', 'demo/specimen.js', 'demo/vendor/lenis.mjs', 'examples/ui.css', release.package])

@@ -23,6 +23,7 @@ execFileSync(process.execPath, [join(output, 'scripts/highlight-demo.js')], { cw
 await mkdir(join(stage, 'downloads'), { recursive: true });
 await rm(join(stage, 'demo'), { recursive: true, force: true });
 await cp(join(output, 'demo'), join(stage, 'demo'), { recursive: true });
+await writeFile(join(stage, 'demo/index.html'), (await readFile(join(stage, 'demo/index.html'), 'utf8')).replace('<base href="/demo/">', '<base href="/">'));
 await mkdir(join(stage, 'demo/vendor'), { recursive: true });
 for (const name of ['lenis.mjs', 'lenis.css']) await cp(join(root, 'node_modules/lenis/dist', name), join(stage, 'demo/vendor', name));
 await cp(join(root, 'node_modules/lenis/LICENSE'), join(stage, 'demo/vendor/lenis.LICENSE'));
@@ -45,13 +46,14 @@ await writeFile(join(stage, 'release.json'), JSON.stringify(release, null, 2));
 await writeFile(join(stage, 'vercel.json'), JSON.stringify({
   redirects: [
     { source: '/', has: [{ type: 'host', value: 'lintapple-demo.vercel.app' }], destination: 'https://lintapple.vercel.app/', permanent: true },
-    { source: '/demo', destination: 'https://lintapple.vercel.app/', permanent: true },
-    { source: '/demo/', destination: 'https://lintapple.vercel.app/', permanent: true },
-    { source: '/demo/:path*', destination: 'https://lintapple.vercel.app/:path*', permanent: true },
+    { source: '/demo', destination: '/', permanent: true },
+    { source: '/demo/', destination: '/', permanent: true },
+    { source: '/demo/:path*', destination: '/:path*', permanent: true },
     { source: '/:path*', has: [{ type: 'host', value: 'lintapple-demo.vercel.app' }], destination: 'https://lintapple.vercel.app/:path*', permanent: true },
   ],
   rewrites: [
     { source: '/', destination: '/demo/index.html' },
+    { source: '/rule/:id', destination: '/demo/index.html' },
     ...Object.keys(hashes).filter(path => path.startsWith('demo/')).map(path => ({ source: `/${path.slice(5)}`, destination: `/${path}` })),
   ],
   headers: [{ source: '/(.*)', headers: [{ key: 'Cache-Control', value: 'no-store' }] }],

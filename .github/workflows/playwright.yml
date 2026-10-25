@@ -2,11 +2,19 @@ name: Playwright UI checks
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: Site URL for hosted browser checks
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
   ui:
     runs-on: ubuntu-latest
+    env:
+      LINTAPPLE_ORIGIN: ${{ github.event.inputs.origin }}
     strategy:
       fail-fast: false
       matrix:
