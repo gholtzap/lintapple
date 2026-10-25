@@ -382,7 +382,10 @@ test('Lenis smooths wheel scrolling, respects motion changes, and resets rule na
       await page.waitForFunction(() => scrollY > 0 && document.documentElement.classList.contains('lenis-smooth'));
       await page.locator('.back-link').click();
       await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
-      await page.waitForFunction(() => scrollY === 0 && !document.documentElement.classList.contains('lenis-scrolling'));
+      await page.waitForFunction(() => scrollY === 0 && !document.documentElement.classList.contains('lenis-scrolling')).catch(async error => {
+        console.log('Navigation scroll state', await page.evaluate(() => ({ scroll: scrollY, classes: document.documentElement.className, url: location.href })));
+        throw error;
+      });
       assert.deepEqual(await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(scrollY))))), 0);
       const home = page.url();
       for (const rule of rules) {
