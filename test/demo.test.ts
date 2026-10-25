@@ -161,6 +161,8 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
           await card.getByRole('link', { name: rule.title, exact: true }).click();
           await page.getByRole('heading', { name: rule.title, exact: true, level: 1 }).waitFor();
           assert.equal(await page.locator('iframe').count(), 1);
+          assert.ok(new URL(page.url()).pathname.endsWith(`/rule/${rule.id}`));
+          assert.equal(new URL(page.url()).hash, '');
           const detail = page.locator('article.detail');
           const frame = await (await detail.locator('iframe').elementHandle())!.contentFrame();
           await frame!.locator('body[data-ready="true"]').waitFor();
@@ -310,13 +312,15 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
     await clean('Removed accessibility page returns to Index');
     await page.goto(`${origin}/demo/#/rule/content-clipping`);
     await page.getByRole('heading', { name: 'Contained text', level: 1, exact: true }).waitFor();
+    assert.equal(new URL(page.url()).hash, '');
+    assert.ok(new URL(page.url()).pathname.endsWith('/rule/content-clipping'));
     await clean('Old text demo link opens the overflow example');
     for (const id of ['accessible-name', 'form-label']) {
-      await page.goto(`${origin}/demo/#/rule/${id}`);
+      await page.goto(`${origin}/demo/rule/${id}`);
       await page.getByRole('heading', { name: 'Rule not found' }).waitFor();
       await clean(`Removed accessibility rule: ${id}`);
     }
-    await page.goto(`${origin}/demo/#/rule/unknown`);
+    await page.goto(`${origin}/demo/rule/unknown`);
     await page.getByRole('heading', { name: 'Rule not found' }).waitFor();
     await clean('Unknown rule');
     const blocked: import('playwright').APIResponse<unknown> = await page.request.get(`${origin}/package.json`);
@@ -370,7 +374,7 @@ test('Lenis smooths wheel scrolling, respects motion changes, and resets rule na
       await page.waitForFunction(() => scrollY > 0 && !document.documentElement.classList.contains('lenis-scrolling'));
       await page.keyboard.press('PageUp');
       await page.waitForFunction(() => scrollY === 0 && !document.documentElement.classList.contains('lenis-scrolling'));
-      await page.goto(`${origin}/demo/#/rule/content-overflow`);
+      await page.goto(`${origin}/demo/rule/content-overflow`);
       await page.getByRole('heading', { name: 'Contained text', level: 1, exact: true }).waitFor();
       await page.locator('body[data-ready="true"]').waitFor();
       await page.mouse.move(width - 16, 200);
@@ -380,6 +384,27 @@ test('Lenis smooths wheel scrolling, respects motion changes, and resets rule na
       await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
       await page.waitForFunction(() => scrollY === 0 && !document.documentElement.classList.contains('lenis-scrolling'));
       assert.deepEqual(await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(scrollY))))), 0);
+      const home = page.url();
+      for (const rule of rules) {
+        await page.goto(new URL(`rule/${rule.id}`, home).href);
+        await page.getByRole('heading', { name: rule.title, level: 1, exact: true }).waitFor();
+        await page.locator('iframe').contentFrame().locator('body[data-ready="true"]').waitFor();
+        await page.reload();
+        await page.getByRole('heading', { name: rule.title, level: 1, exact: true }).waitFor();
+        await page.locator('.back-link').click();
+        await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
+        await page.goBack();
+        await page.getByRole('heading', { name: rule.title, level: 1, exact: true }).waitFor();
+        await page.goForward();
+        await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
+        await page.goto(`${home}#/rule/${rule.id}`);
+        await page.getByRole('heading', { name: rule.title, level: 1, exact: true }).waitFor();
+        assert.equal(page.url(), new URL(`rule/${rule.id}`, home).href);
+        await page.locator('.back-link').click();
+      }
+      assert.equal((await page.request.get(new URL('missing.js', home).href)).status(), 404);
+      assert.equal((await page.request.get(new URL('rule/unknown/extra', home).href)).status(), 404);
+
     }
     await page.setViewportSize({ width: 1440, height: 500 });
     const sidebar = page.locator('.sidebar');

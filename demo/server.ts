@@ -12,7 +12,7 @@ export function createDemoServer() {
     try {
       const url = new URL(request.url ?? '/', 'http://localhost');
       if (url.pathname === '/') { response.writeHead(302, { Location: '/demo/' }); return response.end(); }
-      const path = decodeURIComponent(url.pathname === '/demo/' ? '/demo/index.html' : url.pathname);
+      const path = decodeURIComponent((url.pathname === '/demo/' || /^\/demo\/rule\/[^/]+\/?$/.test(url.pathname)) ? '/demo/index.html' : url.pathname);
       const file = vendorFiles.get(path) || resolve(root, `.${path}`);
       if (!vendorFiles.has(path) && !file.startsWith(resolve(root, 'demo') + sep) && file !== resolve(root, 'examples/ui.css')) {
         response.writeHead(404); return response.end('Page not found.');
