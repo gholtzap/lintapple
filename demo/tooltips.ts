@@ -25,7 +25,7 @@ export const openTooltip = (trigger: HTMLElement) => {
 document.addEventListener('pointerover', event => { const trigger = triggerFor(event.target); if (trigger) openTooltip(trigger); });
 document.addEventListener('focusin', event => { const trigger = triggerFor(event.target); if (trigger) openTooltip(trigger); });
 document.addEventListener('pointerout', event => {
-  if (!active || active.trigger.contains(event.relatedTarget as Node | null) || active.tip.contains(event.relatedTarget as Node | null) || document.activeElement === active.trigger) return;
+  if (!active || !(active.trigger.contains(event.target as Node) || active.tip.contains(event.target as Node)) || active.trigger.contains(event.relatedTarget as Node | null) || active.tip.contains(event.relatedTarget as Node | null) || document.activeElement === active.trigger) return;
   closeTooltip();
 });
 document.addEventListener('focusout', () => { if (active && !active.trigger.matches(':hover') && !active.tip.matches(':hover')) closeTooltip(); });

@@ -164,7 +164,12 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
           const detail = page.locator('article.detail');
           const frame = await (await detail.locator('iframe').elementHandle())!.contentFrame();
           await frame!.locator('body[data-ready="true"]').waitFor();
-          if (rule.id === 'viewport-bounds') await frame!.getByRole('tooltip').waitFor();
+          if (rule.id === 'viewport-bounds') {
+            await frame!.getByRole('tooltip').waitFor();
+            await frame!.locator('.label').hover();
+            await frame!.locator('.specimen').hover({ position: { x: 1, y: 1 } });
+            assert.equal(await frame!.getByRole('tooltip').isVisible(), true, 'Pointer movement outside the tooltip and its trigger must keep the preview open.');
+          }
           const detailIdentity = await frame!.evaluate(() => window.previewIdentity = crypto.randomUUID());
           assert.equal(await page.locator('.report, .report-list, .finding-note, [data-copy]').count(), 0);
           assert.doesNotMatch(await detail.innerText(), /Before check results|Recorded at|Check this example|localhost:4173|Loading check results/);
