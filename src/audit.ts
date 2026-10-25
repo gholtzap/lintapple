@@ -117,19 +117,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         add('copy', el, phrase, 'text without prohibited phrases', 'Remove the phrase or use specific text that helps the user.');
     }
   }
-  for (const el of controls) {
-    const rect = el.getBoundingClientRect();
-    const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
-    if (rect.width + 0.1 < minimum || rect.height + 0.1 < minimum)
-      add('control-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `at least ${minimum}px in each dimension`, 'Increase the control hit area.');
-  }
-  for (const el of elements) {
-    const rule = policy.iconSizeRules.find(rule => el.matches(rule.selector));
-    if (!rule) continue;
-    const rect = el.getBoundingClientRect();
-    if (!rule.sizes.some(size => Math.abs(rect.width - size) <= 0.1 && Math.abs(rect.height - size) <= 0.1))
-      add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
-  }
   const groups = new Map<Element | null, Element[]>();
   for (const el of controls) {
     const parent = el.closest('[data-ui-actions]') ?? el.parentElement;
@@ -386,6 +373,31 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       textScrollY: ancestors.some(node => scrolls(node, 'Y') && node !== document.body && node !== document.documentElement),
     };
   };
+  for (const el of controls) {
+    let { left, right, top, bottom } = el.getBoundingClientRect();
+    for (const clip of contextFor(el).clips) {
+      if (clip.element === el) continue;
+      if (clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
+      if (clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
+    }
+    const rect = { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
+    if (rect.width + 0.1 < minimum || rect.height + 0.1 < minimum)
+      add('control-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `at least ${minimum}px in each dimension`, 'Increase the control hit area.');
+  }
+  for (const el of elements) {
+    const rule = policy.iconSizeRules.find(rule => el.matches(rule.selector));
+    if (!rule) continue;
+    let { left, right, top, bottom } = el.getBoundingClientRect();
+    for (const clip of contextFor(el).clips) {
+      if (clip.element === el) continue;
+      if (clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
+      if (clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
+    }
+    const rect = { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    if (!rule.sizes.some(size => Math.abs(rect.width - size) <= 0.1 && Math.abs(rect.height - size) <= 0.1))
+      add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
+  }
   const outside = (bounds: Bounds, rect: Bounds, x: boolean, y: boolean) => Object.entries(edgeInsets(bounds, rect)).filter(([edge, distance]) => distance < -1 && ((edge === 'left' || edge === 'right') ? x : y));
   const clippedRect = (rect: Bounds, clips: Clip[], el: Element, includeSelf: boolean) => {
     const result = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
