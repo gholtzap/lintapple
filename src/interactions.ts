@@ -147,13 +147,14 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
               break;
             }
             const style = getComputedStyle(node);
+            const textClip = style.backgroundClip.split(',').some(value => value.trim() === 'text');
             const pseudo = ['::before', '::after'].some(pseudo => !['none', 'normal', '""'].includes(getComputedStyle(node, pseudo).content));
             if (node.contains(el)) { uncertain ||= pseudo; continue; }
-            if (!effects && /^rgb\(/.test(style.backgroundColor) && style.borderRadius === '0px') {
+            if (!effects && !textClip && /^rgb\(/.test(style.backgroundColor) && style.borderRadius === '0px') {
               covers.push(node);
               break;
             }
-            const clear = ['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor) && style.backgroundImage === 'none' && style.boxShadow === 'none' && style.outlineStyle === 'none' && ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].every(key => style[key as keyof CSSStyleDeclaration] === '0px') && !pseudo && ![...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) && !node.matches('img,svg,canvas,video,iframe,input,textarea,select');
+            const clear = (['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor) || textClip && !node.childNodes.length) && style.backgroundImage === 'none' && style.boxShadow === 'none' && style.outlineStyle === 'none' && ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].every(key => style[key as keyof CSSStyleDeclaration] === '0px') && !pseudo && ![...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) && !node.matches('img,svg,canvas,video,iframe,input,textarea,select');
             uncertain ||= effects || !clear;
           }
         }
