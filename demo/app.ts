@@ -136,8 +136,10 @@ function navigate() {
   migrateHash();
   lenis.stop();
   render();
-  lenis.start();
-  lenis.scrollTo(0, { immediate: true });
+  requestAnimationFrame(() => {
+    lenis.start();
+    lenis.scrollTo(0, { immediate: true });
+  });
 }
 document.addEventListener('click', event => {
   const link = (event.target as Element).closest<HTMLAnchorElement>('a[href]');
