@@ -44,11 +44,11 @@ function widgetElements(root: Element): Element[] {
 }
 
 // The same focus contract supports direct focus and aria-activedescendant.
-function hasFocus({ selector, tree }: { selector: string; tree: typeof widgetElements }) {
+function hasFocus({ selector, tree, visibility }: { selector: string; tree: typeof widgetElements; visibility: Visibility }) {
   const elements = document.querySelectorAll(selector), active = document.activeElement;
   if (elements.length > 1) throw new Error(`Interaction selector must match one element: ${selector}`);
   const el = elements[0];
-  if (!el || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) || !el.getBoundingClientRect().width || !el.getBoundingClientRect().height || el.closest('[inert]')) return false;
+  if (!el || !visibility.hasVisibleContent(el)) return false;
   return active === el || (active && tree(active).includes(el) && el.id && active.getAttribute('aria-activedescendant') === el.id);
 }
 
@@ -189,7 +189,7 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
         }
         if (kind === 'tabs' && ['Enter', 'Space'].includes(step.key)) {
           const same = await page.evaluate(({ focus, selected }) => document.querySelector(focus) === document.querySelector(selected ?? ''), { focus: step.focus, selected: step.selected });
-          if (!same || !await page.evaluate(hasFocus, { selector: step.selected!, tree })) throw new Error('Tab activation needs the focused tab as its selected target.');
+          if (!same || !await page.evaluate(hasFocus, { selector: step.selected!, tree, visibility })) throw new Error('Tab activation needs the focused tab as its selected target.');
         }
         if (kind === 'menus' && ['Enter', 'Space'].includes(step.key)) {
           const choice = await page.evaluate(({ checked, focus }) => {
@@ -212,7 +212,7 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
         }, { selector: item.selector, key: step.key }) : null;
         try {
           await page.keyboard.press(step.key);
-          const moved = await wait(({ fn, selector, tree }) => fn({ selector, tree }), { fn: focus, selector: step.focus, tree });
+          const moved = await wait(({ fn, selector, tree, visibility }) => fn({ selector, tree, visibility }), { fn: focus, selector: step.focus, tree, visibility });
           await record('keyboard-operation', item.selector, moved, `${step.key} did not focus ${step.focus}`, `${step.key} to focus ${step.focus}`, 'Handle the declared key and update focus or aria-activedescendant.', { phase, focusSelector: step.focus });
           await checkState(phase, step);
           if (closingMenu) {
