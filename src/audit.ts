@@ -36,7 +36,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
     dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
-  const isText = (el: Element) => textRects(el).length > 0 || el.matches('input, textarea, select');
+  const isText = (el: Element) => textRects(el).length > 0 || el.matches('textarea, select') ||
+    el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type);
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
     const tooltip = el.closest('[role="tooltip"]');
