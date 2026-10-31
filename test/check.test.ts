@@ -104,7 +104,7 @@ test('CLI checks real pages, reports stable failures, and rejects invalid input'
     const fail = await cli([`${url}/bad`, '--json']);
     assert.equal(fail.code, 1, fail.stderr);
     const report: UrlReport = JSON.parse(fail.stdout);
-    const expected = ['font-family', 'font-size', 'control-size', 'control-gap', 'layout-gap', 'tabular-numbers', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'text-contrast', 'copy'];
+    const expected = ['font-family', 'font-size', 'control-size', 'control-gap', 'content-inset', 'layout-gap', 'tabular-numbers', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'text-contrast', 'copy'];
     assert.deepEqual([...new Set(report.findings.map(f => f.rule))].sort(), expected.sort());
     assert.ok(report.findings.every(f => f.selector && f.message && f.fix && f.viewport));
     assert.equal(report.summary.occurrences, report.findings.length);

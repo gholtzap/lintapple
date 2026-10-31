@@ -10,13 +10,14 @@ import { finding, summarizeFindings } from './report.js';
 export { summarizeFindings } from './report.js';
 import { runInteractions, validateInteractions } from './interactions.js';
 import { createVisibility } from './visibility.js';
+import { scanTooltips } from './tooltip-scan.js';
 import { svgTextContrast } from './svg-contrast.js';
 
 // Load the module export without assigning the app's global property.
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
@@ -24,16 +25,16 @@ export function validatePolicy(input: unknown = {}): Policy {
   const policy = { ...structuredClone(defaultPolicy), ...input } as Policy;
   for (const key of Object.keys(input)) if (!(key in defaultPolicy)) throw new Error(`Unknown policy field: ${key}`);
   const strings = (value: unknown, name: string, nonempty = true) => {
-    if (!Array.isArray(value) || (nonempty && !value.length) || value.some((v: unknown) => typeof v !== 'string' || !v.trim())) throw new Error(`${name} must be a list of nonempty strings.`);
+    if (!Array.isArray(value) || (nonempty && !value.length) || [...value].some((v: unknown) => typeof v !== 'string' || !v.trim())) throw new Error(`${name} must be a list of nonempty strings.`);
   };
   const positive = (value: number, name: string) => { if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number.`); };
   strings(policy.fonts, 'fonts'); strings(policy.bannedCopy, 'bannedCopy', false);
   if (!Array.isArray(policy.fontSizes) || !policy.fontSizes.length) throw new Error('fontSizes must be a nonempty list.');
-  policy.fontSizes.forEach(n => positive(n, 'fontSizes'));
+  for (const n of policy.fontSizes) positive(n, 'fontSizes');
   if (!Array.isArray(policy.typeRules)) throw new Error('typeRules must be a list.');
   for (const rule of policy.typeRules) {
     if (!rule || Object.keys(rule).some(k => !['selector', 'sizes'].includes(k)) || typeof rule.selector !== 'string' || !rule.selector.trim() || !Array.isArray(rule.sizes) || !rule.sizes.length) throw new Error('Each type rule needs a selector and a nonempty size list.');
-    rule.sizes.forEach(n => positive(n, 'typeRules sizes'));
+    for (const n of rule.sizes) positive(n, 'typeRules sizes');
   }
   positive(policy.minControlSize, 'minControlSize'); positive(policy.minControlGap, 'minControlGap');
   if (!Array.isArray(policy.controlSizeRules)) throw new Error('controlSizeRules must be a list.');
@@ -45,12 +46,30 @@ export function validatePolicy(input: unknown = {}): Policy {
     }
     if ((rule.minViewportWidth ?? 1) > (rule.maxViewportWidth ?? 10000)) throw new Error('Control size rule viewport bounds must be in increasing order.');
   }
+  if (!Array.isArray(policy.contentInsetRules)) throw new Error('contentInsetRules must be a list.');
+  for (const rule of policy.contentInsetRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'contentSelector', 'insets'].includes(key)) ||
+      typeof rule.selector !== 'string' || !rule.selector.trim() || typeof rule.contentSelector !== 'string' || !rule.contentSelector.trim() ||
+      !rule.insets || typeof rule.insets !== 'object' || Array.isArray(rule.insets) || !Object.keys(rule.insets).length)
+      throw new Error('Each content-inset rule needs selector, contentSelector, and a nonempty insets object.');
+    for (const [edge, value] of Object.entries<unknown>(rule.insets)) {
+      if (!['left', 'top', 'right', 'bottom'].includes(edge) || typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+        throw new Error('Content-inset edges must be left, top, right, or bottom with finite nonnegative pixel values.');
+    }
+  }
+  if (!Array.isArray(policy.iconSizeRules)) throw new Error('iconSizeRules must be a list.');
+  for (const rule of policy.iconSizeRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'sizes'].includes(key)) ||
+      typeof rule.selector !== 'string' || !rule.selector.trim() || !Array.isArray(rule.sizes) || !rule.sizes.length)
+      throw new Error('Each icon-size rule needs a selector and a nonempty size list.');
+    for (const size of rule.sizes) positive(size, 'icon-size sizes');
+  }
   positive(policy.minLayoutGap, 'minLayoutGap');
   positive(policy.minControlInset, 'minControlInset');
   strings(policy.controlContainers, 'controlContainers');
   if (!Array.isArray(policy.viewports) || !policy.viewports.length) throw new Error('viewports must be a nonempty list.');
   for (const v of policy.viewports) if (!v || Object.keys(v).some(k => !['width', 'height'].includes(k)) || !Number.isInteger(v.width) || !Number.isInteger(v.height) || v.width < 1 || v.height < 1 || v.width > 10000 || v.height > 10000) throw new Error('Each viewport needs integer width and height from 1 to 10000.');
-  if (!Array.isArray(policy.colorSchemes) || !policy.colorSchemes.length || policy.colorSchemes.some(s => !['light', 'dark'].includes(s))) throw new Error('colorSchemes must contain light or dark.');
+  if (!Array.isArray(policy.colorSchemes) || !policy.colorSchemes.length || [...policy.colorSchemes].some(s => !['light', 'dark'].includes(s))) throw new Error('colorSchemes must contain light or dark.');
   if (!Array.isArray(policy.exceptions)) throw new Error('exceptions must be a list.');
   for (const e of policy.exceptions) {
     if (!e || Object.keys(e).some(k => !['selector', 'rules', 'reason'].includes(k)) || typeof e.selector !== 'string' || !e.selector.trim() || typeof e.reason !== 'string' || !e.reason.trim()) throw new Error('Each exception needs a selector, rules, and a reason.');
@@ -134,8 +153,17 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
           accessibilityCoverage.interactions = interaction.checks;
           accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : interaction.states.length ? 'not tested: page-state actions only' : 'not tested: empty interaction plan';
         }
-        report.runs.push({ viewport, colorScheme, frameCoverage: result.frameCoverage, elements: result.elements, controls: result.controls, insetControls: result.insetControls, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
-        report.findings.push(...findings.map(f => ({ ...f, viewport, colorScheme })));
+        const automatic = await scanTooltips(page, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility, interactions);
+        findings.push(...automatic.findings);
+        suppressed.push(...automatic.suppressed);
+        states.push(...automatic.states);
+        accessibilityCoverage.tooltips = automatic.coverage;
+        if (automatic.checks.length) {
+          accessibilityCoverage.interactions = [...(accessibilityCoverage.interactions ?? []), ...automatic.checks];
+          accessibilityCoverage.interactionRules = 'only listed interactions and declared tooltip states tested';
+        }
+        report.runs.push({ viewport, colorScheme, frameCoverage: result.frameCoverage, elements: result.elements, controls: result.controls, insetControls: result.insetControls, controlContentCoverage: result.controlContentCoverage, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
+        report.findings.push(...findings.map(f => ({ ...f, viewport: f.viewport ?? viewport, colorScheme })));
       } finally { await context.close(); }
     }
     report.summary = summarizeFindings(report.findings);

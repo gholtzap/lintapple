@@ -29,7 +29,7 @@ export function validateInteractions(input: unknown): InteractionPlan {
     const keys = ['name', 'action', 'selector', 'ready', ...(item.action === 'fill' ? ['value'] : item.action === 'press' ? ['key'] : [])];
     if (Object.keys(item).some(key => !keys.includes(key))) throw new Error('Unknown named state field.');
     for (const key of ['name', 'selector'] as const) if (typeof item[key] !== 'string' || !item[key].trim()) throw new Error(`Named state needs ${key}.`);
-    if (item.name.length > 100 || names.has(item.name) || /^(focus|buttons|tooltips|dialogs|tabs|menus)\[\d+\]:/.test(item.name)) throw new Error('State names must be unique, at most 100 characters, and cannot use initial or a generated interaction name.');
+    if (item.name.length > 100 || names.has(item.name) || /^(focus|buttons|tooltips|automatic tooltips|dialogs|tabs|menus)\[\d+\]:/.test(item.name)) throw new Error('State names must be unique, at most 100 characters, and cannot use initial or a generated interaction name.');
     names.add(item.name);
     if (item.action === 'fill' && typeof item.value !== 'string') throw new Error('Fill action needs a string value.');
     if (item.action === 'press' && (typeof item.key !== 'string' || !item.key.trim())) throw new Error('Press action needs a key.');
@@ -82,8 +82,9 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     let result: PageReport;
     try { result = await checkPage(page, policy); }
     catch (error) { throw new Error(`State "${name}" could not be checked: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
-    states.push({ name, url: page.url(), ...result });
-    findings.push(...result.findings.map(item => ({ ...item, state: name })));
+    const viewport = page.viewportSize() ?? undefined;
+    states.push({ name, url: page.url(), ...result, ...(viewport ? { viewport } : {}) });
+    findings.push(...result.findings.map(item => ({ ...item, state: name, ...(viewport ? { viewport } : {}) })));
     suppressed.push(...result.suppressed.map(item => ({ ...item, state: name })));
   };
   const reach = async (locator: Locator) => {
@@ -146,13 +147,14 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
               break;
             }
             const style = getComputedStyle(node);
+            const textClip = style.backgroundClip.split(',').some(value => value.trim() === 'text');
             const pseudo = ['::before', '::after'].some(pseudo => !['none', 'normal', '""'].includes(getComputedStyle(node, pseudo).content));
             if (node.contains(el)) { uncertain ||= pseudo; continue; }
-            if (!effects && /^rgb\(/.test(style.backgroundColor) && style.borderRadius === '0px') {
+            if (!effects && !textClip && /^rgb\(/.test(style.backgroundColor) && style.borderRadius === '0px') {
               covers.push(node);
               break;
             }
-            const clear = ['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor) && style.backgroundImage === 'none' && style.boxShadow === 'none' && style.outlineStyle === 'none' && ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].every(key => style[key as keyof CSSStyleDeclaration] === '0px') && !pseudo && ![...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) && !node.matches('img,svg,canvas,video,iframe,input,textarea,select');
+            const clear = (['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor) || textClip && !node.childNodes.length) && style.backgroundImage === 'none' && style.boxShadow === 'none' && style.outlineStyle === 'none' && ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].every(key => style[key as keyof CSSStyleDeclaration] === '0px') && !pseudo && ![...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) && !node.matches('img,svg,canvas,video,iframe,input,textarea,select');
             uncertain ||= effects || !clear;
           }
         }
@@ -174,23 +176,45 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
   }
   for (const [index, item] of plan.tooltips.entries()) {
     const trigger = await target(item.trigger);
-    await target(item.tooltip);
-    const linked = await trigger.evaluate((el, selector) => {
-      const tip = document.querySelector(selector);
-      const ids = `${el.getAttribute('aria-describedby') || ''} ${el.getAttribute('data-ui-tooltip') || ''}`.split(/\s+/);
-      return tip!.getAttribute('role') === 'tooltip' && tip!.textContent?.trim() && tip!.id && ids.includes(tip!.id);
-    }, item.tooltip);
-    await record('icon-button-tooltip', item.trigger, !!linked, 'tooltip has no text, role, or trigger reference', 'a linked role="tooltip" element with text', 'Connect the text tooltip to its trigger.', { phase: 'tooltip-link' });
-    await page.mouse.move(0, 0);
+    await page.mouse.move(-1, -1);
     await trigger.evaluate(el => (el as HTMLElement).blur());
     if (!await hidden(item.tooltip)) {
       await record('icon-button-tooltip', item.trigger, false, 'tooltip is already visible before hover or focus', 'a tooltip that opens for its trigger', 'Use the tooltip open state or use a visible text label.', { phase: 'tooltip-baseline' });
       continue;
     }
     await trigger.hover({ timeout: plan.timeout });
-    await record('icon-button-tooltip', item.trigger, await shown(item.tooltip), 'tooltip did not appear on hover', 'a text tooltip on hover', 'Show the tooltip on pointer hover.', { phase: 'hover' });
+    const hoverShown = await shown(item.tooltip);
+    const linked = await trigger.evaluate((el, selector) => {
+      const tip = document.querySelector(selector);
+      const ids = `${el.getAttribute('aria-describedby') || ''} ${el.getAttribute('data-ui-tooltip') || ''}`.split(/\s+/);
+      return tip?.getAttribute('role') === 'tooltip' && tip?.textContent?.trim() && tip?.id && ids.includes(tip?.id);
+    }, item.tooltip);
+    await record('icon-button-tooltip', item.trigger, !!linked, 'tooltip has no text, role, or trigger reference', 'a linked role="tooltip" element with text', 'Connect the text tooltip to its trigger.', { phase: 'tooltip-link' });
+    await record('icon-button-tooltip', item.trigger, hoverShown, 'tooltip did not appear on hover', 'a text tooltip on hover', 'Show the tooltip on pointer hover.', { phase: 'hover' });
     await inspect(`tooltips[${index}]: hover`);
-    await page.mouse.move(0, 0);
+    const resize = async (viewport: Policy['viewports'][number]) => {
+      await page.setViewportSize(viewport);
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    };
+    const originalViewport = page.viewportSize();
+    if (hoverShown && originalViewport) {
+      try {
+        for (const viewport of policy.viewports) {
+          if (viewport.width === originalViewport.width && viewport.height === originalViewport.height) continue;
+          await resize(originalViewport);
+          await page.mouse.move(-1, -1);
+          await trigger.hover({ timeout: plan.timeout });
+          if (!await shown(item.tooltip)) {
+            await record('icon-button-tooltip', item.trigger, false, 'tooltip did not reopen before resize', 'an open tooltip before the resize check', 'Show the tooltip on hover.', { phase: 'tooltip-resize', status: 'unresolved' });
+            continue;
+          }
+          await resize(viewport);
+          await inspect(`tooltips[${index}]: resize ${viewport.width}×${viewport.height}`);
+        }
+      } finally { await resize(originalViewport); }
+    }
+
+    await page.mouse.move(-1, -1);
     const reset = await hidden(item.tooltip);
     const reachable = await reach(trigger);
     await record('keyboard-operation', item.trigger, reachable, 'tooltip trigger was not reached within the configured Tab limit', 'a keyboard-reachable tooltip trigger', 'Review the tab order, configured limit, and keyboard navigation.', { phase: 'tooltip-tab', ...(reachable ? {} : { status: 'unresolved' }) });
