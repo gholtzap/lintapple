@@ -11,15 +11,18 @@ import type { UrlReport } from '../src/types.js';
 import type { CliResult } from './types.js';
 import { html } from './audit-cases.js';
 
-const cases = [
+const cases: { name: string; shadow: string; painted: boolean; initial?: string }[] = [
   { name: 'transparent', shadow: '0 0 0 4px rgba(0,0,255,0)', painted: false },
   { name: 'modern-transparent', shadow: '0 0 0 4px color(srgb 0 0 1 / 0)', painted: false },
   { name: 'zero-size', shadow: '0 0 0 0 blue', painted: false },
   { name: 'blue', shadow: '0 0 0 4px blue', painted: true },
   { name: 'layered', shadow: '0 0 0 2px transparent, 0 0 0 4px blue', painted: true },
   { name: 'inset', shadow: 'inset 0 0 0 3px blue', painted: true },
+  { name: 'unchanged-outline', shadow: '0 0 0 4px transparent', painted: false, initial: 'outline:2px solid blue' },
+  { name: 'unchanged-shadow-prefix', shadow: '0 0 0 4px transparent, 0 0 0 2px blue', painted: false, initial: 'box-shadow:0 0 0 2px blue' },
+  { name: 'unchanged-shadow', shadow: '0 0 0 2px blue, 0 0 0 4px transparent', painted: false, initial: 'box-shadow:0 0 0 2px blue' },
 ];
-const button = (shadow: string) => html(`button{outline:none;border:1px solid #111;padding:8px 16px}button:focus-visible{box-shadow:${shadow}}`, '<button id="save">Save preferences</button>');
+const button = (shadow: string, initial = '') => html(`button{outline:none;border:1px solid #111;padding:8px 16px;${initial}}button:focus-visible{box-shadow:${shadow}}`, '<button id="save">Save preferences</button>');
 
 test('CLI focus checks require a painted shadow rather than a computed-style change', async () => {
   await mkdir('test-results', { recursive: true });
@@ -30,14 +33,14 @@ test('CLI focus checks require a painted shadow rather than a computed-style cha
     const entry = cases.find(entry => request.url === `/${entry.name}`);
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
     response.statusCode = entry ? 200 : 404;
-    response.end(entry ? button(entry.shadow) : 'Page not found');
+    response.end(entry ? button(entry.shadow, entry.initial) : 'Page not found');
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const browser = await chromium.launch();
   try {
     for (const entry of cases) {
-      await writeFile(join(directory, `${entry.name}.html`), button(entry.shadow));
+      await writeFile(join(directory, `${entry.name}.html`), button(entry.shadow, entry.initial));
       for (const width of [390, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
         const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
         try {
