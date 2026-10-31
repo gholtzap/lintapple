@@ -11,7 +11,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 const { checkInteractions } = await import(process.env.LINTAPPLE_PACKAGE || '../src/index.js') as typeof import('../src/index.js');
 import { validateInteractions } from '../src/interactions.js';
 
-const shell = (content: string) => `<html lang="en"><style>html{background:white;color:black;font:16px system-ui}button{font:inherit;min-height:32px;margin:8px}button:focus-visible{outline:3px solid blue}</style><body>${content}</body></html>`;
+const shell = (content: string) => `<html lang="en"><style>html{background:white;color:black;font:16px system-ui}button{font:inherit;min-height:32px;margin:8px;padding:0 8px}button:focus-visible{outline:3px solid blue}</style><body>${content}</body></html>`;
 const tabs = ({ manual = false, vertical = false, descendant = false, fault = '' } = {}) => shell(`
 <div id="tabs" role="tablist" aria-label="Case views" ${vertical ? 'aria-orientation="vertical"' : ''} ${descendant ? 'tabindex="0" aria-activedescendant="t1"' : ''}>
 ${[1, 2, 3].map(i => `<button id="t${i}" role="tab" aria-selected="${i === 1}" aria-controls="p${i}" tabindex="${!descendant && i === 1 ? 0 : -1}">View ${i}</button>`).join('')}</div>

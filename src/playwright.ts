@@ -9,7 +9,7 @@ import { loadProjectPolicy } from './project.js';
 export async function expectUI(page: Page, testInfo: Pick<TestInfo, 'attach'>, policy?: Partial<Policy>) {
   const report = await checkPage(page, policy === undefined ? await loadProjectPolicy() : policy);
   const summary = summarizeFindings(report.findings);
-  if (!report.findings.length && !report.frameCoverage.omitted.length) return;
+  if (!report.findings.length && !report.frameCoverage.omitted.length && !report.controlContentCoverage.unmeasured.length && !report.accessibilityCoverage.tooltips?.unmeasured.length) return;
   await testInfo.attach(report.findings.length ? 'lintapple findings' : 'lintapple coverage', {
     body: JSON.stringify({ url: page.url(), viewport: page.viewportSize(), ...report, summary }, null, 2),
     contentType: 'application/json',

@@ -1,6 +1,7 @@
 import type { AccessibilityInput, AccessibilityCoverage, RuleId } from './types.js';
 // Runs in the browser with the same scope and report helpers as the layout audit.
 export async function auditAccessibility({ elements, controls, visible, hasVisibleContent, add, engine }: AccessibilityInput): Promise<AccessibilityCoverage> {
+  const unmeasured: NonNullable<AccessibilityCoverage['tooltips']>['unmeasured'] = [];
   const rules: Record<string, RuleId> = {
     'button-name': 'accessible-name', 'input-button-name': 'accessible-name',
     'input-image-alt': 'accessible-name', 'aria-tab-name': 'accessible-name',
@@ -50,7 +51,7 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
   }
   engine.setup(document);
   try {
-    const refs = (el: Element) => (el.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).map(id => document.getElementById(id));
+    const refs = (el: Element) => (el as Element & { ariaLabelledByElements?: readonly Element[] | null }).ariaLabelledByElements ?? (el.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).map(id => document.getElementById(id));
     const labelText = (el: Element) => engine.commons.text.accessibleText(el, { inLabelledByContext: true }).trim();
     const hasLabelText = (label: Element, control: Element): boolean => {
       if (label === control) return false;
@@ -61,6 +62,8 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
     for (const el of elements) {
       for (const attr of ['aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns', 'aria-activedescendant', 'aria-details', 'aria-errormessage', 'aria-flowto']) {
         if (!el.hasAttribute(attr)) continue;
+        if (attr === 'aria-labelledby' && refs(el).length && !el.getAttribute(attr)?.trim()) continue;
+        if (attr === 'aria-errormessage' && (el.getAttribute('aria-invalid') ?? 'false').toLowerCase() === 'false') continue;
         // A collapsed popup can create its controlled element only when opened.
         if (attr === 'aria-controls' && el.getAttribute('aria-expanded') === 'false') continue;
         const ids = el.getAttribute(attr)!.trim().split(/\s+/).filter(Boolean);
@@ -85,11 +88,15 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
       if (!engine.commons.dom.isVisibleOnScreen(el) || /[\p{L}\p{N}]/u.test(engine.commons.text.visible(el)) || el.matches('input')) continue;
       const ids = `${el.getAttribute('aria-describedby') || ''} ${el.getAttribute('data-ui-tooltip') || ''}`.trim().split(/\s+/).filter(Boolean);
       const tooltip = ids.map(id => document.getElementById(id)).find(node => node?.getAttribute('role') === 'tooltip' && node.textContent?.trim());
-      if (!tooltip) add('icon-button-tooltip', el, 'no linked text tooltip', 'a text tooltip for a button without a visible text label', 'Give the button an accessible name. Connect a role="tooltip" element with aria-describedby or data-ui-tooltip, and show it on hover and keyboard focus.', null, { status: 'failed', category: 'design' });
+      const pending = (el.getAttribute('data-ui-tooltip') ?? '').split(/\s+/).filter(Boolean).some(id => !document.getElementById(id));
+      if (!tooltip && pending) unmeasured.push({ selector: el.id ? `#${CSS.escape(el.id)}` : el.tagName.toLowerCase(), reason: 'The declared tooltip is not mounted. Open it to check its content and bounds.' });
+      else if (!tooltip) add('icon-button-tooltip', el, 'no linked text tooltip', 'a text tooltip for a button without a visible text label', 'Give the button an accessible name. Connect a role="tooltip" element with aria-describedby or data-ui-tooltip, and show it on hover and keyboard focus.', null, { status: 'failed', category: 'design' });
     }
+    const nativeModal = document.elementFromPoint(0, 0)?.closest('dialog:modal');
     for (const dialog of elements.filter(el => el.matches('dialog:modal, [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]'))) {
+      if (nativeModal && dialog !== nativeModal && !nativeModal.contains(dialog)) continue;
       if (!dialog.contains(document.activeElement)) add('dialog-focus', dialog, 'focus outside the open modal', 'focus inside the open modal', 'Move focus into the modal when it opens. Test focus containment and return with an interaction plan.', null, { status: 'failed', category: 'accessibility' });
     }
   } finally { engine.teardown(); }
-  return { pageRules: [...new Set<RuleId>([...Object.values(rules), 'aria-reference', 'icon-button-tooltip', 'dialog-focus'])], interactionRules: 'not tested without an interaction plan' };
+  return { pageRules: [...new Set<RuleId>([...Object.values(rules), 'aria-reference', 'icon-button-tooltip', 'dialog-focus'])], interactionRules: 'not tested without an interaction plan', ...(unmeasured.length ? { tooltips: { checked: [], unmeasured } } : {}) };
 }
