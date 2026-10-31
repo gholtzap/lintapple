@@ -5,11 +5,15 @@ export interface DemoRule {
   group: 'Typography' | 'Layout' | 'Color' | 'Content';
   summary: string;
   fix: string;
+  note?: string;
   html: string;
   before: string;
   after: string;
   attributes?: Partial<Record<ExampleState, Record<string, Record<string, string | null>>>>;
 }
 declare global {
-  interface Window { setExampleState?: (state: ExampleState) => void }
+  interface Window {
+    setExampleState?: (state: ExampleState) => void;
+    dismissExampleTooltip?: () => void;
+  }
 }

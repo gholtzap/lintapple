@@ -15,6 +15,8 @@ export interface Policy {
   minControlGap: number;
   minControlInset: number;
   controlContainers: string[];
+  contentInsetRules: { selector: string; contentSelector: string; insets: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>> }[];
+  iconSizeRules: { selector: string; sizes: number[] }[];
   minLayoutGap: number;
   bannedCopy: string[];
   viewports: { width: number; height: number }[];
@@ -23,6 +25,7 @@ export interface Policy {
 }
 export type Status = 'passed' | 'failed' | 'unresolved';
 export interface FindingDetails {
+  viewport?: Policy['viewports'][number];
   selector?: string;
   relatedSelector?: string;
   status?: Status;
@@ -50,7 +53,8 @@ export interface Finding extends FindingDetails {
 }
 export interface SuppressedFinding { rule: RuleId; selector: string; reason: string; state?: string }
 export interface InteractionCheck extends FindingDetails { rule: RuleId; selector: string; status: Status }
-export interface AccessibilityCoverage { pageRules: RuleId[]; interactionRules: string; interactions?: InteractionCheck[] }
+export interface TooltipCoverage { checked: { trigger: string; tooltip: string }[]; unmeasured: { selector: string; reason: string }[] }
+export interface AccessibilityCoverage { tooltips?: TooltipCoverage; pageRules: RuleId[]; interactionRules: string; interactions?: InteractionCheck[] }
 export interface FrameLocation { url: string; name: string; path: string }
 export interface FrameCoverage {
   checked: FrameLocation;
@@ -76,11 +80,12 @@ export interface PageReport {
   elements: number;
   controls: number;
   insetControls: number;
+  controlContentCoverage: { checked: number; unmeasured: { selector: string; reason: string }[] };
   numericElements: number;
   alignmentGroups: number;
   radiusContracts: number;
 }
-export interface StateReport extends PageReport { name: string; url: string }
+export interface StateReport extends PageReport { name: string; url: string; viewport?: Policy['viewports'][number] }
 export interface InteractionReport { findings: Finding[]; suppressed: SuppressedFinding[]; checks: InteractionCheck[]; states: StateReport[] }
 export interface UrlReport {
   summary: FindingSummary;
