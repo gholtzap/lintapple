@@ -153,7 +153,7 @@ npm run demo
 The package exports built JavaScript and generated types for `lintapple` and `lintapple/playwright`.
 Node.js users do not need a TypeScript loader. Run `npm run release:build` to prepare the demo and package for release.
 
-Functions sent to the browser with `.toString()` must define their values inside the function or receive them as arguments. They cannot use imported values or values from an outer scope. `npm test` checks concrete function declarations at `.toString()` calls in the compiled JavaScript and reports outside references. Keep a direct serialization call for each browser function so the guard can inspect it. Browser APIs remain available.
+Functions sent to the browser with `.toString()` must define their values inside the function or receive them as arguments. They cannot use imported values, values from an outer scope, or captured context such as module `this` and `import.meta`. `npm test` checks concrete function declarations at `.toString()` calls in the compiled JavaScript and reports outside references. Keep a direct serialization call for each browser function so the guard can inspect it. Browser APIs remain available.
 
 ## License
 

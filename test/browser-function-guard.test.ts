@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
+import { chromium } from 'playwright';
 import { inspectBrowserFunctions } from './browser-function-guard.js';
 
 async function inspect(source: string) {
@@ -27,6 +28,7 @@ test('browser function guard rejects imported, module, outer-scope, and undefine
     'function enclosing(value) { const shipped = () => value; return shipped.toString(); }',
     'function shipped(el) { return missingHelper(el); }',
     'function shipped() { return process.version; }',
+    'function shipped() { return import.meta.url; }',
   ]) {
     const result = await inspect(`${source}\n${source.includes('enclosing') ? '' : 'shipped.toString();'}`);
     assert.equal(result.functions.length, 1, source);
@@ -65,6 +67,82 @@ test('browser function guard checks default parameters and imported serializatio
   assert.equal(result.functions.length, 2);
   assert.equal(result.violations.length, 1);
   assert.match(result.violations[0], /outside/);
+});
+
+test('browser function guard permits local arguments, labels, and parenthesized functions', async () => {
+  const result = await inspect(`
+    function shipped() {
+      const local = () => arguments[0];
+      loop: for (let index = 0; index < 2; index++) {
+        if (index) break loop;
+        continue loop;
+      }
+      function nested() { return arguments[0]; }
+      return [local(), nested(1), new.target];
+    }
+    (shipped).toString();
+    ((value) => value).toString();
+    (function (value) { return value; }).toString();
+    const variable = ((value) => value);
+    variable.toString();
+  `);
+  assert.equal(result.functions.length, 4);
+  assert.deepEqual(result.violations, []);
+  const outside = await inspect('function wrap() { const shipped = () => new.target; return shipped.toString(); }');
+  assert.match(outside.violations.join('\n'), /outside value new.target/);
+});
+
+test('browser function guard separates local class context from captured property keys and super', async () => {
+  const local = await inspect(`
+    const shipped = () => {
+      class Local {
+        field = this;
+        static { this.count = 1; }
+        method() { return this; }
+      }
+      return new Local();
+    };
+    shipped.toString();
+  `);
+  assert.equal(local.functions.length, 1);
+  assert.deepEqual(local.violations, []);
+  for (const source of [
+    'const shipped = () => ({ [this.key]() { return 1; } }); shipped.toString();',
+    'const holder = { method() { const shipped = () => super.key; return shipped.toString(); } };',
+  ]) {
+    const captured = await inspect(source);
+    assert.equal(captured.functions.length, 1);
+    assert.equal(captured.violations.length, 1);
+    assert.match(captured.violations[0], /outside value (this|super)/);
+  }
+});
+
+test('browser function guard rejects module this that binds to page state in Chromium', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'lintapple-browser-context-'));
+  const file = join(directory, 'context.mjs');
+  await writeFile(file, `
+    export function local() { return arguments[0]; }
+    export const captured = () => this?.value;
+    local.toString(); captured.toString();
+  `);
+  const browser = await chromium.launch();
+  try {
+    const functions = await import(pathToFileURL(file).href) as { local: (value: string) => string; captured: () => unknown };
+    const page = await browser.newPage();
+    await page.evaluate(() => { Object.assign(window, { value: 'page value' }); });
+    const local = await page.evaluateHandle<(value: string) => string>(`(${functions.local.toString()})`);
+    const captured = await page.evaluateHandle<() => unknown>(`(${functions.captured.toString()})`);
+    assert.equal(await page.evaluate(fn => fn('local value'), local), 'local value');
+    assert.equal(functions.captured(), undefined);
+    assert.equal(await page.evaluate(fn => fn(), captured), 'page value');
+    const result = inspectBrowserFunctions([file]);
+    assert.equal(result.functions.length, 2);
+    assert.equal(result.violations.length, 1);
+    assert.match(result.violations[0], /browser function captured uses outside value this/);
+  } finally {
+    await browser.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('compiled browser functions have no outside values', async () => {
