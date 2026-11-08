@@ -1,4 +1,4 @@
-import type { Page, Frame } from 'playwright';
+import type { Page, Frame, JSHandle } from 'playwright';
 import type { Policy, PageReport, InteractionPlan, InteractionReport, CheckOptions, UrlReport, AxeEngine, Visibility, Finding, SuppressedFinding } from './types.js';
 import policyDefaults from '../ui-policy.json' with { type: 'json' };
 export type * from './types.js';
@@ -87,11 +87,16 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
     await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });
   const svgContrast = await svgTextContrast(page);
-  const contrast = await page.evaluateHandle<AxeEngine>(`(() => { const module = { exports: {} }; const define = undefined; ${engineSource}\n return module.exports; })()`);
-  const accessibility = await page.evaluateHandle<typeof auditAccessibility>(`(${auditAccessibility.toString()})`);
-  const format = await page.evaluateHandle<typeof finding>(`(${finding.toString()})`);
-  const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+  const handles: JSHandle[] = [];
   try {
+    const contrast = await page.evaluateHandle<AxeEngine>(`(() => { const module = { exports: {} }; const define = undefined; ${engineSource}\n return module.exports; })()`);
+    handles.push(contrast);
+    const accessibility = await page.evaluateHandle<typeof auditAccessibility>(`(${auditAccessibility.toString()})`);
+    handles.push(accessibility);
+    const format = await page.evaluateHandle<typeof finding>(`(${finding.toString()})`);
+    handles.push(format);
+    const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+    handles.push(visibility);
     const result = await page.evaluate(audit, { policy, contrast, accessibility, format, visibility, svgContrast });
     const frame = 'mainFrame' in page ? page.mainFrame() : page;
     const descendants = (parent: Frame): Frame[] => parent.childFrames().flatMap(child => [child, ...descendants(child)]);
@@ -102,7 +107,7 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
     const describe = (frame: Frame) => ({ url: frame.url(), name: frame.name(), path: path(frame) });
     return { ...result, findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
   }
-  finally { await Promise.all([contrast.dispose(), accessibility.dispose(), format.dispose(), visibility.dispose()]); }
+  finally { await Promise.all(handles.map(handle => handle.dispose())); }
 }
 
 export async function checkInteractions(page: Page, plan: Partial<InteractionPlan>, input: Partial<Policy> = {}, { timeout = 15000 } = {}): Promise<InteractionReport> {
