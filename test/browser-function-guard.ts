@@ -3,8 +3,8 @@ import ts from 'typescript';
 
 type BrowserFunction = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
 
-// Inspect emitted JavaScript so type-only names do not count as captured values.
-export function inspectBrowserFunctions(files: string[]): { functions: string[]; violations: string[] } {
+// Check serialized JavaScript and typed transport calls before type imports are erased.
+export function inspectBrowserFunctions(files: string[], { serialized = true } = {}): { functions: string[]; violations: string[] } {
   const options: ts.CompilerOptions = {
     allowJs: true, noEmit: true, target: ts.ScriptTarget.ES2023,
     module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
@@ -41,6 +41,11 @@ export function inspectBrowserFunctions(files: string[]): { functions: string[];
       return false;
     };
     const visit = (node: ts.Node) => {
+      if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)
+        || (ts.isHeritageClause(node) && node.token === ts.SyntaxKind.ImplementsKeyword)) return;
+      // A class extends expression remains a runtime lookup after type erasure.
+      if (ts.isExpressionWithTypeArguments(node)) { visit(node.expression); return; }
+      if (ts.isTypeNode(node)) return;
       const capturedContext = (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword)
         || ((node.kind === ts.SyntaxKind.ThisKeyword || node.kind === ts.SyntaxKind.SuperKeyword || ts.isMetaProperty(node)) && !localContext(node));
       if (capturedContext) {
@@ -68,20 +73,31 @@ export function inspectBrowserFunctions(files: string[]): { functions: string[];
     };
     visit(fn);
   };
-  // shortcut: function parameters need a direct checked call until browser code is bundled.
+  const inspectTarget = (expression: ts.Expression, transport = false) => {
+    const target = unwrap(expression);
+    const type = checker.getTypeAtLocation(target);
+    let symbol = checker.getSymbolAtLocation(target);
+    if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    const declaration = symbol?.valueDeclaration;
+    if (transport && declaration && ts.isParameter(declaration)) return;
+    const fn = ts.isArrowFunction(target) || ts.isFunctionExpression(target) ? target
+      : declaration && ts.isFunctionDeclaration(declaration) ? declaration
+      : declaration && ts.isVariableDeclaration(declaration) && declaration.initializer ? unwrap(declaration.initializer) : undefined;
+    if (fn && (ts.isFunctionDeclaration(fn) || ts.isFunctionExpression(fn) || ts.isArrowFunction(fn))) inspect(fn, target.getText());
+    else if (type.getCallSignatures().length) {
+      violations.add(`${location(target)}: Cannot inspect browser function ${target.getText()}. Use a function declaration or a function variable.`);
+    }
+  };
+  // shortcut: callback parameters need a direct checked owner until browser code is bundled.
+  const transports = new Set(['evaluate', 'evaluateHandle', 'waitForFunction', 'evaluateAll']);
   const find = (node: ts.Node) => {
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'toString') {
-      const target = unwrap(node.expression.expression);
-      const type = checker.getTypeAtLocation(target);
-      let symbol = checker.getSymbolAtLocation(target);
-      if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-      const declaration = symbol?.valueDeclaration;
-      const fn = ts.isArrowFunction(target) || ts.isFunctionExpression(target) ? target
-        : declaration && ts.isFunctionDeclaration(declaration) ? declaration
-        : declaration && ts.isVariableDeclaration(declaration) && declaration.initializer ? unwrap(declaration.initializer) : undefined;
-      if (fn && (ts.isFunctionDeclaration(fn) || ts.isFunctionExpression(fn) || ts.isArrowFunction(fn))) inspect(fn, target.getText());
-      else if (type.getCallSignatures().length) {
-        violations.add(`${location(target)}: Cannot inspect browser function ${target.getText()}. Use a function declaration or a function variable.`);
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const method = node.expression.name.text;
+      if (serialized && method === 'toString') inspectTarget(node.expression.expression);
+      else if (transports.has(method) && node.arguments[0]) {
+        const owner = checker.getResolvedSignature(node)?.declaration?.getSourceFile().fileName ?? '';
+        // Method names alone also match unrelated APIs that run callbacks in Node.js.
+        if (/[/\\]node_modules[/\\]playwright(?:-core)?[/\\]/.test(owner)) inspectTarget(node.arguments[0], true);
       }
     }
     ts.forEachChild(node, find);
