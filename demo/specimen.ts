@@ -19,13 +19,6 @@ if (!rule || (state !== 'before' && state !== 'after') || (theme !== 'light' && 
   let selectedState: ExampleState = state;
   let transition: ViewTransition | undefined;
   const applyState = () => {
-    for (const [selector, attributes] of Object.entries(rule.attributes?.[selectedState] || {})) {
-      const element = specimen.querySelector(selector)!;
-      for (const [name, value] of Object.entries(attributes)) {
-        if (value === null) element.removeAttribute(name);
-        else element.setAttribute(name, value);
-      }
-    }
     style.textContent = rule[selectedState];
     document.body.dataset.state = selectedState;
     document.title = `${rule.title} — ${selectedState}`;
