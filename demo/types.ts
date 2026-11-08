@@ -9,7 +9,6 @@ export interface DemoRule {
   html: string;
   before: string;
   after: string;
-  attributes?: Partial<Record<ExampleState, Record<string, Record<string, string | null>>>>;
 }
 declare global {
   interface Window {
