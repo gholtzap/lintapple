@@ -76,7 +76,6 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
         }
       }
     }
-    await writeFile(new URL(process.env.LINTAPPLE_ORIGIN ? '../../test-results/production-matrix.json' : '../demo/reports.json', import.meta.url), `${JSON.stringify({ command: process.env.LINTAPPLE_ORIGIN ? 'Production package and browser verification' : 'npm run demo:check', origin, policy: 'ui-policy.json', examples }, null, 2)}\n`);
     await writeFile(new URL('../../test-results/demo-specimens.json', import.meta.url), JSON.stringify(examples, null, 2));
     for (const viewport of [...defaultPolicy.viewports, { width: 768, height: 900 }]) {
       await page.setViewportSize(viewport);
@@ -326,6 +325,7 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
     const blocked: import('playwright').APIResponse<unknown> = await page.request.get(`${origin}/package.json`);
     assert.equal(blocked.status(), 404);
     assert.deepEqual(consoleErrors, []);
+    await writeFile(new URL(process.env.LINTAPPLE_ORIGIN ? '../../test-results/production-matrix.json' : '../../test-results/demo-matrix.json', import.meta.url), `${JSON.stringify({ command: process.env.LINTAPPLE_ORIGIN ? 'Production package and browser verification' : 'npm run demo:check', origin, policy: 'ui-policy.json', examples }, null, 2)}\n`);
     console.log(`Checked ${examples.length} specimen states and ${shellChecks.length} page states. All after states pass. Before states match the expected results.`);
   } finally {
     await browser.close();
