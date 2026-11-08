@@ -1,22 +1,85 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { inspectBrowserFunctions } from './browser-function-guard.js';
 
-async function inspect(source: string) {
+async function inspect(source: string, extension = 'js') {
   const directory = await mkdtemp(join(tmpdir(), 'lintapple-browser-functions-'));
   try {
+    await symlink(dirname(dirname(createRequire(import.meta.url).resolve('playwright/package.json'))), join(directory, 'node_modules'), 'dir');
     await writeFile(join(directory, 'helper.js'), 'export const helper = value => value;');
     await writeFile(join(directory, 'helper.d.ts'), 'export declare const helper: (value: string) => string;');
-    const file = join(directory, 'index.js');
+    const file = join(directory, `index.${extension}`);
     await writeFile(file, source);
     return inspectBrowserFunctions([file]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
+
+test('browser function guard checks direct Playwright callbacks and their named owners', async () => {
+  const result = await inspect(`
+    import { chromium } from 'playwright';
+    import { helper as imported } from './helper.js';
+    const page = await (await chromium.launch()).newPage();
+    const outside = 'module value';
+    function named() { return outside; }
+    const variable = () => outside;
+    await page.evaluate(named);
+    await page.evaluateHandle(variable);
+    await page.waitForFunction(() => outside);
+    await page.locator('body').evaluateAll(elements => outside + elements.length);
+    await page.evaluate(imported, 'value');
+    await page.evaluate(value => ({ value, title: document.title }), 'value');
+    await page.evaluateHandle(function () { return window.innerWidth; });
+    await page.waitForFunction(() => document.readyState === 'complete');
+    await page.evaluate('document.title');
+  `);
+  assert.equal(result.functions.length, 8);
+  assert.equal(result.violations.length, 4, result.violations.join('\n'));
+  assert.ok(result.violations.every(value => /outside value outside/.test(value)));
+});
+
+test('browser function guard leaves unrelated methods and indirect callback parameters alone', async () => {
+  const result = await inspect(`
+    import { chromium } from 'playwright';
+    const page = await (await chromium.launch()).newPage();
+    const outside = 'module value';
+    const unrelated = {
+      evaluate(fn) { return fn(); },
+      evaluateHandle(fn) { return fn(); },
+      waitForFunction(fn) { return fn(); },
+      evaluateAll(fn) { return fn(); },
+    };
+    unrelated.evaluate(() => outside);
+    unrelated.evaluateHandle(() => outside);
+    unrelated.waitForFunction(() => outside);
+    unrelated.evaluateAll(() => outside);
+    async function forward(fn) { return page.evaluate(fn); }
+  `);
+  assert.deepEqual(result.functions, []);
+  assert.deepEqual(result.violations, []);
+});
+
+test('typed Playwright callbacks permit imported types and reject imported runtime values', async () => {
+  const result = await inspect(`
+    import type { Page } from 'playwright';
+    import { helper } from './helper.js';
+    async function run(page: Page) {
+      function identity<T extends Pick<Page, 'url'>>(value: T) { return value as Pick<Page, 'url'>; }
+      await page.evaluate(identity, { url: 'example' });
+      await page.evaluate(() => helper('value'));
+      await page.evaluate(() => class extends helper {});
+      const forward = (fn: () => boolean) => page.waitForFunction(fn);
+    }
+  `, 'ts');
+  assert.equal(result.functions.length, 3);
+  assert.equal(result.violations.length, 2, result.violations.join('\n'));
+  assert.ok(result.violations.every(value => /outside value helper/.test(value)));
+});
 
 test('browser function guard rejects imported, module, outer-scope, and undefined values', async () => {
   for (const source of [
@@ -150,5 +213,14 @@ test('compiled browser functions have no outside values', async () => {
   const files = (await readdir(directory)).filter(file => file.endsWith('.js')).map(file => join(directory, file));
   const result = inspectBrowserFunctions(files);
   assert.ok(result.functions.length >= 7, 'No browser functions found. Check serialization discovery.');
+  assert.deepEqual(result.violations, [], result.violations.join('\n'));
+});
+
+test('typed source checks Playwright callbacks before type imports are erased', async () => {
+  const directory = fileURLToPath(new URL('../../src/', import.meta.url));
+  const files = (await readdir(directory)).filter(file => file.endsWith('.ts')).map(file => join(directory, file));
+  const result = inspectBrowserFunctions(files, { serialized: false });
+  assert.ok(result.functions.some(value => value.endsWith(' audit')), 'The direct audit callback was not checked.');
+  assert.ok(result.functions.some(value => /svg-contrast\.ts:.*value =>/.test(value)), 'The handle callback was not checked.');
   assert.deepEqual(result.violations, [], result.violations.join('\n'));
 });
