@@ -1,4 +1,4 @@
-import type { Page, Locator } from 'playwright';
+import type { Page, Locator, JSHandle } from 'playwright';
 import type { InteractionPlan, WidgetHelpers, CheckedState, Visibility, Status, MenuStep, TabStep, Menu } from './types.js';
 type WidgetStep = MenuStep & Partial<Pick<TabStep, 'selected'>>;
 type WidgetEntry = Omit<Menu, 'steps'> & { steps: WidgetStep[] };
@@ -125,11 +125,16 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
     const validRole = kind === 'tabs' ? role === 'tablist' : item.open ? role === 'menu' : ['menu', 'menubar'].includes(role ?? '');
     await record('control-state', item.selector, validRole, `widget role is ${role}`, kind === 'tabs' ? 'role="tablist"' : item.open ? 'role="menu"' : 'role="menu" or "menubar"', 'Use the correct widget role.', { phase: 'widget-role' });
     if (!validRole) continue;
-    const tree = await page.evaluateHandle<typeof widgetElements>(`(${widgetElements.toString()})`);
-    const focus = await page.evaluateHandle<typeof hasFocus>(`(${hasFocus.toString()})`);
-    const stateHandle = await page.evaluateHandle<typeof widgetState>(`(${widgetState.toString()})`);
-    const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+    const handles: JSHandle<unknown>[] = [];
     try {
+      const tree = await page.evaluateHandle<typeof widgetElements>(`(${widgetElements.toString()})`);
+      handles.push(tree);
+      const focus = await page.evaluateHandle<typeof hasFocus>(`(${hasFocus.toString()})`);
+      handles.push(focus);
+      const stateHandle = await page.evaluateHandle<typeof widgetState>(`(${widgetState.toString()})`);
+      handles.push(stateHandle);
+      const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+      handles.push(visibility);
       // A handle keeps the app's global objects unchanged.
       const checkState = async (phase: string, step: Partial<WidgetStep> = {}) => {
         const witness = { selector: item.selector, kind, selected: step.selected, checked: step.checked, visibility, tree };
@@ -203,14 +208,17 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
           if (!choice.disabled && choice.role === 'menuitemradio' && choice.expected !== true) throw new Error('Menu radio activation needs a true checked state.');
           if (choice.role === 'menuitem' && !choice.disabled && !step.outcome && !(choice.submenu && choice.next)) throw new Error('A menu action needs a declared outcome or submenu focus target.');
         }
-        const previousChoices = kind === 'menus' && !['Enter', 'Space'].includes(step.key) ? await root.evaluateHandle((el, tree) => tree(el).filter(child => child.matches('[role="menuitemcheckbox"], [role="menuitemradio"]')).map(el => ({ el, value: el.getAttribute('aria-checked') })), tree) : null;
-        const closingMenu = kind === 'menus' && ['Escape', 'Tab', 'Shift+Tab'].includes(step.key) ? await page.evaluateHandle(({ selector, key }) => {
-          const root = document.querySelector(selector)!, active = document.activeElement;
-          const el = active?.getAttribute('aria-activedescendant') ? document.getElementById(active.getAttribute('aria-activedescendant')!) : active;
-          const menu = key === 'Escape' ? el?.closest('[role="menu"]') : (root.getAttribute('role') === 'menu' ? root : el?.closest('[role="menu"]'));
-          return { menu, id: menu?.id, root: menu === root };
-        }, { selector: item.selector, key: step.key }) : null;
+        const stepHandles: JSHandle<unknown>[] = [];
         try {
+          const previousChoices = kind === 'menus' && !['Enter', 'Space'].includes(step.key) ? await root.evaluateHandle((el, tree) => tree(el).filter(child => child.matches('[role="menuitemcheckbox"], [role="menuitemradio"]')).map(el => ({ el, value: el.getAttribute('aria-checked') })), tree) : null;
+          if (previousChoices) stepHandles.push(previousChoices);
+          const closingMenu = kind === 'menus' && ['Escape', 'Tab', 'Shift+Tab'].includes(step.key) ? await page.evaluateHandle(({ selector, key }) => {
+            const root = document.querySelector(selector)!, active = document.activeElement;
+            const el = active?.getAttribute('aria-activedescendant') ? document.getElementById(active.getAttribute('aria-activedescendant')!) : active;
+            const menu = key === 'Escape' ? el?.closest('[role="menu"]') : (root.getAttribute('role') === 'menu' ? root : el?.closest('[role="menu"]'));
+            return { menu, id: menu?.id, root: menu === root };
+          }, { selector: item.selector, key: step.key }) : null;
+          if (closingMenu) stepHandles.push(closingMenu);
           await page.keyboard.press(step.key);
           const moved = await wait(({ fn, selector, tree, visibility }) => fn({ selector, tree, visibility }), { fn: focus, selector: step.focus, tree, visibility });
           await record('keyboard-operation', item.selector, moved, `${step.key} did not focus ${step.focus}`, `${step.key} to focus ${step.focus}`, 'Handle the declared key and update focus or aria-activedescendant.', { phase, focusSelector: step.focus });
@@ -248,8 +256,8 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
           if (inspect) await inspect(`${kind}[${widgetIndex}]: step ${index + 1} ${step.key}`);
           // Stop when focus is wrong so later keys cannot activate unrelated controls.
           if (!moved) break;
-        } finally { if (previousChoices) await previousChoices.dispose(); if (closingMenu) await closingMenu.dispose(); }
+        } finally { await Promise.all(stepHandles.map(handle => handle.dispose())); }
       }
-    } finally { await Promise.all([stateHandle.dispose(), visibility.dispose(), tree.dispose(), focus.dispose()]); }
+    } finally { await Promise.all(handles.map(handle => handle.dispose())); }
   }
 }
