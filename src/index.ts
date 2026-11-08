@@ -87,7 +87,7 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
     await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });
   const svgContrast = await svgTextContrast(page);
-  const handles: JSHandle[] = [];
+  const handles: JSHandle<unknown>[] = [];
   try {
     const contrast = await page.evaluateHandle<AxeEngine>(`(() => { const module = { exports: {} }; const define = undefined; ${engineSource}\n return module.exports; })()`);
     handles.push(contrast);

@@ -13,14 +13,14 @@ test('page and widget checks release handles when later setup fails, then recove
   try {
     const page = await browser.newPage();
     await page.setContent(html);
-    const evaluateHandle = page.evaluateHandle.bind(page) as (fn: unknown, argument?: unknown) => Promise<JSHandle>;
+    const evaluateHandle = page.evaluateHandle.bind(page) as (fn: unknown, argument?: unknown) => Promise<JSHandle<unknown>>;
     const plans = [
       () => checkPage(page),
       () => checkInteractions(page, { tabs: [{ selector: '#tabs', steps: [{ key: 'Home', focus: '#tab', selected: '#tab' }] }] }),
     ];
     for (const check of plans) for (const failAt of [2, 3, 4]) {
-      const handles: JSHandle[] = [];
-      const disposed: JSHandle[] = [];
+      const handles: JSHandle<unknown>[] = [];
+      const disposed: JSHandle<unknown>[] = [];
       let attempts = 0;
       page.evaluateHandle = (async (fn: unknown, argument?: unknown) => {
         if (++attempts === failAt) throw new Error('Controlled browser setup failure');
@@ -50,7 +50,7 @@ test('a menu step releases its saved choices when creating the closing-menu hand
     await page.locator('#choice').focus();
     const prototype = Object.getPrototypeOf(page.locator('#menu')) as Locator;
     const original = prototype.evaluateHandle;
-    let choices: JSHandle | undefined;
+    let choices: JSHandle<unknown> | undefined;
     let disposed = false;
     t.mock.method(prototype, 'evaluateHandle', async function (this: Locator, ...args: Parameters<Locator['evaluateHandle']>) {
       const handle = await original.apply(this, args);
@@ -59,7 +59,7 @@ test('a menu step releases its saved choices when creating the closing-menu hand
       handle.dispose = async () => { disposed = true; await dispose(); };
       return handle;
     });
-    const evaluateHandle = page.evaluateHandle.bind(page) as (fn: unknown, argument?: unknown) => Promise<JSHandle>;
+    const evaluateHandle = page.evaluateHandle.bind(page) as (fn: unknown, argument?: unknown) => Promise<JSHandle<unknown>>;
     let attempts = 0;
     page.evaluateHandle = (async (fn: unknown, argument?: unknown) => {
       if (++attempts === 5) throw new Error('Controlled menu step failure');

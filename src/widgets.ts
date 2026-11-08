@@ -125,7 +125,7 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
     const validRole = kind === 'tabs' ? role === 'tablist' : item.open ? role === 'menu' : ['menu', 'menubar'].includes(role ?? '');
     await record('control-state', item.selector, validRole, `widget role is ${role}`, kind === 'tabs' ? 'role="tablist"' : item.open ? 'role="menu"' : 'role="menu" or "menubar"', 'Use the correct widget role.', { phase: 'widget-role' });
     if (!validRole) continue;
-    const handles: JSHandle[] = [];
+    const handles: JSHandle<unknown>[] = [];
     try {
       const tree = await page.evaluateHandle<typeof widgetElements>(`(${widgetElements.toString()})`);
       handles.push(tree);
@@ -208,7 +208,7 @@ export async function runWidgets(page: Page, plan: InteractionPlan, { target, re
           if (!choice.disabled && choice.role === 'menuitemradio' && choice.expected !== true) throw new Error('Menu radio activation needs a true checked state.');
           if (choice.role === 'menuitem' && !choice.disabled && !step.outcome && !(choice.submenu && choice.next)) throw new Error('A menu action needs a declared outcome or submenu focus target.');
         }
-        const stepHandles: JSHandle[] = [];
+        const stepHandles: JSHandle<unknown>[] = [];
         try {
           const previousChoices = kind === 'menus' && !['Enter', 'Space'].includes(step.key) ? await root.evaluateHandle((el, tree) => tree(el).filter(child => child.matches('[role="menuitemcheckbox"], [role="menuitemradio"]')).map(el => ({ el, value: el.getAttribute('aria-checked') })), tree) : null;
           if (previousChoices) stepHandles.push(previousChoices);
