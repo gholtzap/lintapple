@@ -153,6 +153,10 @@ npm run demo
 The package exports built JavaScript and generated types for `lintapple` and `lintapple/playwright`.
 Node.js users do not need a TypeScript loader. Run `npm run release:build` to prepare the demo and package for release.
 
+`npm run demo:check` saves the local demo matrix in `test-results/demo-matrix.json`. Page and specimen diagnostics stay in `test-results/demo-ui.json` and `test-results/demo-specimens.json`. Tests with `LINTAPPLE_ORIGIN` save external evidence in `test-results/production-matrix.json`.
+
+Run `npm run demo:record` to update the saved `demo/reports.json` snapshot. This command runs all demo tests and replaces the snapshot only after every test passes. It requires local checks without `LINTAPPLE_ORIGIN`. Failed checks leave the saved snapshot unchanged.
+
 Functions sent to the browser must define their values inside the function or receive them as arguments. They cannot use imported values, values from an outer scope, or captured context such as module `this` and `import.meta`. `npm test` checks concrete functions at `.toString()` calls in the compiled JavaScript. It also checks direct Playwright `evaluate`, `evaluateHandle`, `waitForFunction`, and `evaluateAll` calls in the TypeScript source, before type imports are erased. Browser APIs remain available.
 
 The guard uses Playwright method declarations to distinguish browser calls from unrelated methods. It cannot trace callback parameters through wrappers. Keep a direct checked call for each browser function so the guard can inspect its definition.

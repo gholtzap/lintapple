@@ -31,6 +31,7 @@
     "check": "npm run build && node dist/bin/lintapple.js",
     "demo": "npm run build && node dist/demo/server.js",
     "demo:check": "npm run build && node --test dist/test/demo.test.js",
+    "demo:record": "npm run build && node dist/scripts/record-demo.js",
     "release:build": "npm run build && node dist/scripts/build-release.js",
     "test:playwright": "npm run build && playwright test --config dist/examples/playwright/playwright.config.js",
     "demo:highlight": "npm run build && node dist/scripts/highlight-demo.js",
