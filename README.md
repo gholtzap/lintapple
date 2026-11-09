@@ -4,6 +4,8 @@
 
 It should be impossible for AI to make a bad UI.
 
+**A UI linter for web pages.** Run it from your terminal or Playwright tests to check rendered pages against fixed design rules.
+
 [npm](https://www.npmjs.com/package/lintapple) · [Demo](https://lintapple.vercel.app/)
 
 ## Install

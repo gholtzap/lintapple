@@ -7,7 +7,7 @@ html::-webkit-scrollbar { display: none; }
 body { padding: 0; }
 a { color: inherit; text-decoration: none; }
 a:hover { text-decoration: underline; }
-a:focus-visible, summary:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+a:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 button { font-size: 14px; font-weight: 500; }
 button:hover { background: var(--ui-background); }
 [hidden] { display: none !important; }
@@ -24,7 +24,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .nav-group p { font-weight: 500; }
 nav a { color: var(--muted); line-height: 20px; }
 nav a[aria-current="page"] { color: var(--ui-text); font-weight: 600; }
-.mobile-nav { display: none; }
 main { width: 100%; max-width: 640px; margin: 0 auto; padding: 24px 32px 80px; }
 h1 { font-size: 24px; font-weight: 500; letter-spacing: -.6px; }
 h2 { font-size: 20px; font-weight: 500; letter-spacing: -.4px; }
@@ -65,6 +64,6 @@ h3 { font-size: 18px; font-weight: 500; letter-spacing: -.4px; }
 .copy-status { font-size: 12px; color: var(--muted); }
 .copy-status:empty { display: none; }
 .empty { padding: 32px 0; }
-@media (max-width: 1023px) { .sidebar { display: none; } .mobile-nav { display: block; margin-bottom: 24px; font-size: 14px; } .mobile-nav summary { cursor: pointer; padding: 8px 0; } .mobile-nav nav { padding: 16px 0; } }
+@media (max-width: 1023px) { .sidebar { display: none; } }
 @media (max-width: 639px) { .site-header { padding: 8px 20px; } main { padding: 24px 28px 48px; } .rule-grid { grid-template-columns: minmax(0,1fr); } .intro { margin-bottom: 32px; } }
 @media (prefers-reduced-motion: no-preference) { button { transition: background-color 120ms ease; } }

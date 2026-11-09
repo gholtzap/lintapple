@@ -23,13 +23,13 @@ function gallery() {
   return `<div class="intro ui-stack" data-ui-stack>
     <h1>About</h1>
     <p>It should be impossible for AI to make a bad UI.</p>
-    <p>lintapple checks for common UI mistakes that AI overlooks when building frontends.</p>
+    <p>lintapple is a UI linter for web pages. It checks for common UI mistakes that AI overlooks when building frontends.</p>
     <section class="ui-stack" data-ui-stack>
       <h2>Ask your coding agent</h2>
       <p class="fix-code">Install and set up github.com/gholtzap/lintapple in this project. Configure it for this app’s URL, fonts, and text sizes.</p>
     </section>
     <section class="ui-stack" data-ui-stack>
-      <h2>Or run this command</h2>
+      <h2>Run in your terminal</h2>
       <div class="install-command ui-stack" data-ui-stack>
         <div class="command-code" data-ui-container>
           ${highlightedCode['npm install -D lintapple && npx lintapple init']}
@@ -72,10 +72,10 @@ function render() {
   const id = requestedId === 'content-clipping' ? 'content-overflow' : requestedId;
   const rule = rules.find(entry => entry.id === id);
   document.querySelector('.sidebar')!.innerHTML = navigation(id);
-  main.innerHTML = `<details class="mobile-nav"><summary>Browse rules</summary>${navigation(id)}</details>${id ? rule ? detail(rule) : '<div class="empty ui-stack" data-ui-stack><h1>Rule not found</h1><a href="./">Return to About</a></div>' : gallery()}`;
+  main.innerHTML = id ? rule ? detail(rule) : '<div class="empty ui-stack" data-ui-stack><h1>Rule not found</h1><a href="./">Return to About</a></div>' : gallery();
   const tooltipExample = main.querySelector<HTMLElement>('[data-rule="viewport-bounds"]');
   if (tooltipExample) setPreviewState(tooltipExample, states.get('viewport-bounds')!);
-  document.title = rule ? `${rule.title} — lintapple` : 'lintapple — It should be impossible for AI to make a bad UI.';
+  document.title = rule ? `${rule.title} — lintapple` : 'lintapple — UI linter for web pages';
   document.body.dataset.ready = 'true';
 }
 

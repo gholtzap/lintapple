@@ -82,6 +82,7 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
       await page.goto(`${origin}/demo/`);
       await page.locator('body[data-ready="true"]').waitFor();
       await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
+      assert.equal(await page.getByText('Browse rules', { exact: true }).count(), 0);
       assert.deepEqual(await page.locator('.intro pre').allTextContents(), [
         'npm install -D lintapple && npx lintapple init',
       ]);
@@ -264,11 +265,6 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
         await clean(`Index hover, ${theme}, ${viewport.width}px`);
         await themeControl.focus();
         await clean(`Index focus, ${theme}, ${viewport.width}px`);
-        if (viewport.width < 1024) {
-          await page.locator('.mobile-nav summary').click();
-          await clean(`Index open navigation, ${theme}, ${viewport.width}px`);
-          await page.locator('.mobile-nav summary').click();
-        }
         await page.locator('[data-rule] [data-state="before"]').evaluateAll(buttons => buttons.forEach(button => (button as HTMLElement).click()));
       }
     }
@@ -367,6 +363,8 @@ test('native wheel and keyboard scrolling work and rule navigation resets the pa
       await page.waitForFunction(() => scrollY > 0);
       await page.keyboard.press('PageUp');
       await page.waitForFunction(() => scrollY === 0);
+      // Keep the detail page taller than the viewport for the scroll check.
+      await page.setViewportSize({ width, height: 600 });
       await page.goto(`${origin}/demo/rule/content-overflow`);
       await page.getByRole('heading', { name: 'Contained text', level: 1, exact: true }).waitFor();
       await page.locator('body[data-ready="true"]').waitFor();
@@ -377,6 +375,7 @@ test('native wheel and keyboard scrolling work and rule navigation resets the pa
       await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
       await page.waitForFunction(() => scrollY === 0);
       assert.deepEqual(await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(scrollY))))), 0);
+      await page.setViewportSize({ width, height: 844 });
       const home = page.url();
       for (const rule of rules) {
         await page.goto(new URL(`rule/${rule.id}`, home).href);
