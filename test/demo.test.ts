@@ -333,56 +333,49 @@ test('demo examples report expected errors, fixes pass, and all routes and contr
   }
 });
 
-test('Lenis smooths wheel scrolling, respects motion changes, and resets rule navigation', async () => {
+test('native wheel and keyboard scrolling work and rule navigation resets the page', { timeout: 60000 }, async () => {
   const server = process.env.LINTAPPLE_ORIGIN ? null : createDemoServer();
   if (server) await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = process.env.LINTAPPLE_ORIGIN || `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
   const browser = await chromium.launch();
   const page = await browser.newPage();
   page.setDefaultTimeout(5000);
+  const wheel = async (deltaY: number) => {
+    const ended = page.evaluate(() => new Promise<void>(resolve => addEventListener('scrollend', () => resolve(), { once: true })));
+    await page.mouse.wheel(0, deltaY);
+    await ended;
+  };
   try {
     for (const width of [390, 1440]) {
       await page.setViewportSize({ width, height: 844 });
       await page.goto(`${origin}/demo/`);
       await page.locator('body[data-ready="true"]').waitFor();
-      await page.locator('html.lenis').waitFor();
       for (const reducedMotion of ['no-preference', 'reduce', 'no-preference'] as const) {
         await page.emulateMedia({ reducedMotion });
         await page.evaluate(() => window.scrollTo(0, 0));
         await page.waitForFunction(() => scrollY === 0);
-        await page.evaluate(() => new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-        await page.evaluate(() => {
-          window.scrollSamples = [];
-          window.sampleScroll = true;
-          const sample = () => {
-            window.scrollSamples.push(scrollY);
-            if (window.sampleScroll) requestAnimationFrame(sample);
-          };
-          requestAnimationFrame(sample);
-        });
         const heading = (await page.getByRole('heading', { name: 'About', level: 1, exact: true }).boundingBox())!;
+        assert.equal(await page.getByRole('heading', { name: 'About', level: 1, exact: true }).evaluate(el =>
+          el.dispatchEvent(new WheelEvent('wheel', { deltaY: 600, bubbles: true, cancelable: true }))
+        ), true, 'The page must leave wheel events to the browser.');
         await page.mouse.move(heading.x + 8, heading.y + 8);
-        await page.mouse.wheel(0, 600);
-        await page.waitForFunction(() => scrollY > 0 && !document.documentElement.classList.contains('lenis-scrolling'));
-        const samples = await page.evaluate(() => { window.sampleScroll = false; return window.scrollSamples; });
-        const intermediate = new Set(samples.filter(value => value > 0 && value < 599));
-        if (reducedMotion === 'reduce') assert.equal(intermediate.size, 0, 'Reduced motion must scroll without intermediate positions.');
-        else assert.ok(intermediate.size > 2, 'Normal wheel scrolling must move across several frames.');
+        await wheel(600);
+        await page.waitForFunction(() => scrollY > 0);
       }
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.keyboard.press('PageDown');
-      await page.waitForFunction(() => scrollY > 0 && !document.documentElement.classList.contains('lenis-scrolling'));
+      await page.waitForFunction(() => scrollY > 0);
       await page.keyboard.press('PageUp');
-      await page.waitForFunction(() => scrollY === 0 && !document.documentElement.classList.contains('lenis-scrolling'));
+      await page.waitForFunction(() => scrollY === 0);
       await page.goto(`${origin}/demo/rule/content-overflow`);
       await page.getByRole('heading', { name: 'Contained text', level: 1, exact: true }).waitFor();
       await page.locator('body[data-ready="true"]').waitFor();
       await page.mouse.move(width - 16, 200);
-      await page.mouse.wheel(0, 300);
-      await page.waitForFunction(() => scrollY > 0 && document.documentElement.classList.contains('lenis-smooth'));
+      await wheel(300);
+      await page.waitForFunction(() => scrollY > 0);
       await page.locator('.back-link').click();
       await page.getByRole('heading', { name: 'About', level: 1, exact: true }).waitFor();
-      await page.waitForFunction(() => scrollY === 0 && !document.documentElement.classList.contains('lenis-scrolling'));
+      await page.waitForFunction(() => scrollY === 0);
       assert.deepEqual(await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(scrollY))))), 0);
       const home = page.url();
       for (const rule of rules) {
@@ -415,8 +408,7 @@ test('Lenis smooths wheel scrolling, respects motion changes, and resets rule na
     assert.equal(await page.evaluate(() => scrollY), 0, 'Sidebar scrolling must not move the page.');
     for (const name of ['lenis.mjs', 'lenis.css']) {
       const asset: import('playwright').APIResponse<unknown> = await page.request.get(`${origin}/demo/vendor/${name}`);
-      assert.equal(asset.status(), 200);
-      assert.match(asset.headers()['content-type'], name.endsWith('.css') ? /text\/css/ : /javascript/);
+      assert.equal(asset.status(), 404);
     }
     assert.equal((await page.request.get(`${origin}/node_modules/lenis/package.json`)).status(), 404);
   } finally {

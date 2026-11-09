@@ -2,7 +2,6 @@ import type { DemoRule, ExampleState } from './types.js';
 import { rules } from './rules.js';
 import { highlightedCode } from './highlighted-code.js';
 import './tooltips.js';
-import Lenis from './vendor/lenis.mjs';
 
 const base = new URL('.', document.baseURI);
 const main = document.querySelector('main')!;
@@ -10,7 +9,6 @@ const themeButton = document.querySelector<HTMLButtonElement>('#theme-toggle')!;
 const groups = [...new Set(rules.map(rule => rule.group))];
 const states = new Map(rules.map(rule => [rule.id, 'before' as ExampleState]));
 let theme = document.documentElement.dataset.theme;
-let lenis: Lenis;
 const escape = (value: string) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 const icon = (name: DemoRule['group']) => `<svg viewBox="0 0 24 24" aria-hidden="true">${({ Typography: '<path d="M4 5h16M12 5v14M8 19h8"/>', Layout: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M4 11h16M11 11v9"/>', Color: '<circle cx="12" cy="12" r="8"/><path d="M12 4v16"/>', Content: '<path d="M5 6h14M5 12h10M5 18h14"/>' })[name]}</svg>`;
 const frameURL = (id: string, state: ExampleState) => `specimen.html?rule=${id}&state=${state}&theme=${theme}`;
@@ -79,7 +77,6 @@ function render() {
   if (tooltipExample) setPreviewState(tooltipExample, states.get('viewport-bounds')!);
   document.title = rule ? `${rule.title} — lintapple` : 'lintapple — It should be impossible for AI to make a bad UI.';
   document.body.dataset.ready = 'true';
-  lenis?.resize();
 }
 
 function setPreviewState(example: HTMLElement, state: ExampleState) {
@@ -122,9 +119,6 @@ themeButton.addEventListener('click', () => {
 });
 migrateHash();
 render();
-const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-lenis = new Lenis({ autoRaf: true, virtualScroll: () => !reducedMotion.matches });
-reducedMotion.addEventListener('change', () => lenis.scrollTo(lenis.actualScroll, { immediate: true }));
 function migrateHash() {
   if (!location.hash.startsWith('#/')) return;
   const route = location.hash.match(/^#\/rule\/([^/]+)$/)?.[1];
@@ -134,12 +128,8 @@ function migrateHash() {
 }
 function navigate() {
   migrateHash();
-  lenis.stop();
   render();
-  requestAnimationFrame(() => {
-    lenis.start();
-    lenis.scrollTo(0, { immediate: true });
-  });
+  requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'instant' }));
 }
 document.addEventListener('click', event => {
   const link = (event.target as Element).closest<HTMLAnchorElement>('a[href]');

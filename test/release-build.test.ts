@@ -36,8 +36,9 @@ test('a checkout with spaces builds a complete release with verified package and
     assert.match(await readFile(join(checkout, 'demo/index.html'), 'utf8'), /<base href="\/demo\/">/);
     const packed = await readFile(join(stage, release.package));
     assert.equal(`sha512-${createHash('sha512').update(packed).digest('base64')}`, release.packageIntegrity);
-    for (const path of ['demo/index.html', 'demo/app.js', 'demo/specimen.js', 'demo/vendor/lenis.mjs', 'examples/ui.css', release.package])
+    for (const path of ['demo/index.html', 'demo/app.js', 'demo/specimen.js', 'examples/ui.css', release.package])
       assert.ok(release.hashes[path], `The release must include ${path}.`);
+    assert.ok(Object.keys(release.hashes).every(path => !path.includes('lenis')), 'The release must not include the scroll library.');
     await assert.rejects(readFile(join(stage, 'demo/app.ts')), { code: 'ENOENT' });
     execFileSync(process.execPath, ['--input-type=module', '--check'], { input: await readFile(join(stage, 'demo/app.js')) });
     await assert.rejects(execute(process.execPath, [join(checkout, 'dist/scripts/build-release.js'), checkout], { cwd: checkout, env }), /Use a separate directory/);

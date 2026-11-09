@@ -10,7 +10,5 @@ declare global {
     writeText: typeof navigator.clipboard.writeText;
     previewIdentity: string;
     transitionCount: number;
-    scrollSamples: number[];
-    sampleScroll: boolean;
   }
 }
