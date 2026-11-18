@@ -376,10 +376,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   for (const el of controls) {
     let { left, right, top, bottom } = el.getBoundingClientRect();
-    for (const clip of contextFor(el).clips) {
+    const { ancestors, clips } = contextFor(el);
+    for (const clip of clips) {
       if (clip.element === el) continue;
-      if (clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
-      if (clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
+      if (clip.x && !scrollsWithin(ancestors, clip, 'X')) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
+      if (clip.y && !scrollsWithin(ancestors, clip, 'Y')) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
     }
     const rect = { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
     const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
