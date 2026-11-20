@@ -24,7 +24,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
   const suppressed: SuppressedFinding[] = [];
-  const { textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
+  const { visuallyHidden, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const elements = [...document.querySelectorAll('body, body *')].filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
@@ -36,8 +36,15 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
     dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
+  const loadedImages = new Set<Element>();
+  await Promise.all(elements.filter(el => el.matches('input[type="image"][src]')).map(async el => {
+    const image = new Image();
+    image.src = (el as HTMLInputElement).src;
+    try { await image.decode(); loadedImages.add(el); } catch { /* A failed image can paint its alternate text. */ }
+  }));
   const isText = (el: Element) => textRects(el).length > 0 || el.matches('textarea, select') ||
-    el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type);
+    el instanceof HTMLOptionElement && el.text.trim().length > 0 && !!el.closest('select')?.matches('select[multiple], select[size]:not([size="0"]):not([size="1"])') ||
+    el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type) && !loadedImages.has(el);
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
     const tooltip = el.closest('[role="tooltip"]');
@@ -60,6 +67,24 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = getComputedStyle(el, '::placeholder');
     return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? style : null;
   };
+  const textPseudos = (el: Element) => {
+    const pseudos: string[] = [];
+    if (el.matches('input[type="file"]')) pseudos.push('::file-selector-button');
+    const style = styles.get(el)!;
+    if (style.display === 'list-item') {
+      const marker = getComputedStyle(el, '::marker');
+      if (!['none', 'normal', '""'].includes(marker.content) || marker.content === 'normal' && style.listStyleImage === 'none' && /^(decimal|lower-|upper-)/.test(style.listStyleType)) pseudos.push('::marker');
+    }
+    if (['block', 'list-item', 'inline-block', 'flow-root', 'table-cell', 'table-caption'].includes(style.display)) pseudos.push('::first-letter', '::first-line');
+    return pseudos.flatMap(pseudo => {
+      const style = getComputedStyle(el, pseudo);
+      if (['::first-letter', '::first-line'].includes(pseudo)) {
+        if (style.fontFamily === styles.get(el)!.fontFamily && style.fontSize === styles.get(el)!.fontSize) return [];
+        if (![el, ...el.querySelectorAll('*')].some(node => visible(node) && textRects(node).length > 0)) return [];
+      }
+      return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? [{ pseudo, style }] : [];
+    });
+  };
   const hasTabularNumbers = (style: CSSStyleDeclaration) => {
     const feature = style.fontFeatureSettings.match(/['"]tnum['"](?:\s+(\d+|on|off))?(?=\s*,|$)/)?.[1];
     return /['"]tnum['"]/.test(style.fontFeatureSettings) ? feature !== 'off' && feature !== '0' : style.fontVariantNumeric.split(/\s+/).includes('tabular-nums');
@@ -67,11 +92,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el)!;
-    if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
-    if (!el.closest('pre, code, kbd, samp'))
-      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
+    if (!visuallyHidden(el) && isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
+    if (!visuallyHidden(el) && !el.closest('pre, code, kbd, samp'))
+      for (const { pseudo, style: textStyle } of [...generatedTextStyles(el), ...textPseudos(el)]) checkFont(el, textStyle, pseudo);
     const placeholder = placeholderStyle(el);
-    if (placeholder && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
+    if (placeholder && !visuallyHidden(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
@@ -333,13 +358,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('nested-radius', inner, innerValues[0], `${Number((expected / innerScale.x).toFixed(2))}px inner radius`, 'Set the inner radius to max(0px, outer radius minus the inset). The inset includes the border.');
   }
   const styleOf = (el: Element) => styles.get(el) ?? getComputedStyle(el);
-  const hasVisuallyHiddenClip = (el: Element) => {
-    const style = styleOf(el);
-    return el instanceof HTMLElement && style.display !== 'contents' &&
-      (style.position === 'absolute' || style.position === 'fixed') && style.overflow === 'hidden' &&
-      (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)') &&
-      el.offsetWidth <= 1 && el.offsetHeight <= 1;
-  };
   const scrolls = (node: Element, axis: 'X' | 'Y') => node.clientWidth > 0 && node.clientHeight > 0 && !['inline', 'contents'].includes(styleOf(node).display) && /^(auto|scroll)$/.test(styleOf(node)[`overflow${axis}`]);
   const scrollsWithin = (ancestors: Element[], clip: Pick<Clip, 'element' | 'bounds'>, axis: 'X' | 'Y') => {
     for (const node of ancestors) {
@@ -494,7 +512,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
     const context = contextFor(el);
     // Check the current style so text that appears on focus can still fail.
-    const checkClipping = context.clips.length > 0 && !context.ancestors.some(hasVisuallyHiddenClip);
+    const checkClipping = context.clips.length > 0 && !visuallyHidden(el);
     const generated = generatedTextRects(el);
     if (generated === null && checkClipping)
       add('content-clipping', el, 'generated text geometry could not be measured', 'text lines inside the clipping area', 'Review the generated text and its clipping area.', undefined, { status: 'unresolved' });
