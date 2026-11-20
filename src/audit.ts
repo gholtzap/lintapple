@@ -376,12 +376,50 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   for (const el of controls) {
     let { left, right, top, bottom } = el.getBoundingClientRect();
-    for (const clip of contextFor(el).clips) {
+    const { ancestors, clips } = contextFor(el);
+    let maxWidth = Infinity, maxHeight = Infinity;
+    for (const clip of clips) {
       if (clip.element === el) continue;
-      if (clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
-      if (clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
+      if (clip.x && !scrollsWithin(ancestors, clip, 'X')) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
+      if (clip.y && !scrollsWithin(ancestors, clip, 'Y')) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
     }
-    const rect = { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    // A scrollport can expose its scrollable area, but not overflow before its origin.
+    // Read the scroll offsets; do not scroll the app to measure its controls.
+    for (const node of ancestors.slice(1)) {
+      const scrollX = scrolls(node, 'X'), scrollY = scrolls(node, 'Y');
+      if (!scrollX && !scrollY) continue;
+      const style = styleOf(node), bounds = clientBounds(node), scale = scaleFor(node), transform = transformFor(node);
+      const signX = transform.a < 0 ? -1 : 1, signY = transform.d < 0 ? -1 : 1;
+      const vertical = style.writingMode !== 'horizontal-tb';
+      let reverseX = vertical ? style.writingMode.endsWith('-rl') : style.direction === 'rtl';
+      let reverseY = vertical && ((style.direction === 'rtl') !== (style.writingMode === 'sideways-lr'));
+      if (style.display.includes('flex')) {
+        const mainX = style.flexDirection.startsWith('row') !== vertical;
+        if (style.flexDirection.endsWith('reverse')) {
+          if (mainX) reverseX = !reverseX; else reverseY = !reverseY;
+        }
+        if (style.flexWrap === 'wrap-reverse') {
+          if (mainX) reverseY = !reverseY; else reverseX = !reverseX;
+        }
+      }
+      reverseX = reverseX !== (signX < 0);
+      reverseY = reverseY !== (signY < 0);
+      if (scrollX) {
+        maxWidth = Math.min(maxWidth, bounds.right - bounds.left);
+        const range = node.scrollWidth - node.clientWidth;
+        const origin = bounds.left - node.scrollLeft * scale.x * signX;
+        left = Math.max(left, origin - (reverseX ? range : 0) * scale.x);
+        right = Math.min(right, origin + (node.clientWidth + (reverseX ? 0 : range)) * scale.x);
+      }
+      if (scrollY) {
+        maxHeight = Math.min(maxHeight, bounds.bottom - bounds.top);
+        const range = node.scrollHeight - node.clientHeight;
+        const origin = bounds.top - node.scrollTop * scale.y * signY;
+        top = Math.max(top, origin - (reverseY ? range : 0) * scale.y);
+        bottom = Math.min(bottom, origin + (node.clientHeight + (reverseY ? 0 : range)) * scale.y);
+      }
+    }
+    const rect = { width: Math.min(maxWidth, Math.max(0, right - left)), height: Math.min(maxHeight, Math.max(0, bottom - top)) };
     const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
     if (rect.width + 0.1 < minimum || rect.height + 0.1 < minimum)
       add('control-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `at least ${minimum}px in each dimension`, 'Increase the control hit area.');
