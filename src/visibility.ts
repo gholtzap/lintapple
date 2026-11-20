@@ -1,5 +1,15 @@
 // Runs in the browser. A semantic group can be visible without its own box.
 export function createVisibility() {
+  const visuallyHidden = (el: Element) => {
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (node instanceof HTMLElement && style.display !== 'contents' &&
+          (style.position === 'absolute' || style.position === 'fixed') && style.overflow === 'hidden' &&
+          (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)') &&
+          node.offsetWidth <= 1 && node.offsetHeight <= 1) return true;
+    }
+    return false;
+  };
   const textRects = (el: Element) => {
     const rects: DOMRect[] = [];
     for (const node of el.childNodes) {
@@ -70,5 +80,5 @@ export function createVisibility() {
     return true;
   };
   const hasVisibleContent = (el: Element | null | undefined): boolean => !!el?.isConnected && (visible(el) || [...el.querySelectorAll('*')].some(visible));
-  return { textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles };
+  return { visuallyHidden, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles };
 }
