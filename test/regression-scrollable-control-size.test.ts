@@ -13,6 +13,7 @@ import { assertProcessError } from './assert-process-error.js';
 const execute = promisify(execFile);
 const cases = [
   { name: 'vertical fold', axis: 'Y', offset: 100, fails: false },
+  { name: 'normal flow fold', axis: 'Y', offset: 100, flow: true, fails: false },
   { name: 'horizontal fold', axis: 'X', offset: 100, fails: false },
   { name: 'unreachable top', axis: 'Y', offset: -60, fails: true },
   { name: 'unreachable left', axis: 'X', offset: -60, fails: true },
@@ -31,13 +32,13 @@ const cases = [
   { name: 'flipped horizontal scrollport', axis: 'X', offset: 100, css: 'scale:-1 1;', fails: false },
   { name: 'aligned reverse flex', axis: 'Y', offset: -60, css: 'display:flex;flex-direction:column-reverse;justify-content:flex-end;', fails: false },
 ] as const;
-type Case = { name: string; axis: string; offset: number; fails: boolean; css?: string; overflow?: string; size?: number; extent?: boolean };
+type Case = { name: string; axis: string; offset: number; fails: boolean; css?: string; overflow?: string; size?: number; extent?: boolean; flow?: boolean };
 const fixture = (entry: Case) => `<!doctype html><html lang="en"><title>Scrollable control</title><style>
 html{background:#fff;color:#111;font:16px system-ui}body{margin:24px}
 #shell,#scroll{width:120px;height:120px}#shell{overflow:hidden}
 #scroll{overflow:${entry.overflow ?? 'auto'};position:relative;${entry.css ?? ''}}
-button{position:absolute;left:${entry.axis === 'X' ? entry.offset : 0}px;top:${entry.axis === 'Y' ? entry.offset : 0}px;box-sizing:border-box;width:${entry.size ?? 80}px;height:${entry.size ?? 80}px;padding:0;border:0;font:inherit;color:inherit;background:white}
-</style><body><div id="shell"><div id="scroll"><button id="save">Save</button>${entry.extent ? '<div style="position:absolute;top:240px;width:1px;height:1px"></div>' : ''}</div></div></body></html>`;
+button{position:${entry.flow ? 'static' : 'absolute'};left:${entry.axis === 'X' ? entry.offset : 0}px;top:${entry.axis === 'Y' ? entry.offset : 0}px;box-sizing:border-box;width:${entry.size ?? 80}px;height:${entry.size ?? 80}px;padding:0;border:0;font:inherit;color:inherit;background:white}
+</style><body><div id="shell"><div id="scroll">${entry.flow ? `<div style="height:${entry.offset}px"></div>` : ''}<button id="save">Save</button>${entry.extent ? '<div style="position:absolute;top:240px;width:1px;height:1px"></div>' : ''}</div></div></body></html>`;
 
 test('control size distinguishes scrollable controls from unreachable and permanent clips', async () => {
   const browser = await chromium.launch();
@@ -56,7 +57,7 @@ test('control size distinguishes scrollable controls from unreachable and perman
           const button = el.querySelector('button')!;
           const bounds = () => {
             const target = button.getBoundingClientRect(), port = el.getBoundingClientRect(), shell = el.parentElement!.getBoundingClientRect();
-            return { scrollLeft: el.scrollLeft, scrollTop: el.scrollTop, button: target.toJSON(),
+            return { scrollLeft: el.scrollLeft, scrollTop: el.scrollTop, button: { left: target.left, top: target.top, right: target.right, bottom: target.bottom, width: target.width, height: target.height },
               hitWidth: Math.max(0, Math.min(target.right, port.right, shell.right) - Math.max(target.left, port.left, shell.left)),
               hitHeight: Math.max(0, Math.min(target.bottom, port.bottom, shell.bottom) - Math.max(target.top, port.top, shell.top)) };
           };
@@ -88,7 +89,7 @@ test('CLI reports permanent clips but accepts controls reachable through scrolli
   await mkdir(directory, { recursive: true });
   const config = resolve(directory, 'policy.json');
   await writeFile(config, JSON.stringify({ minControlSize: 44, viewports: [{ width: 390, height: 720 }, { width: 1280, height: 720 }], colorSchemes: ['light', 'dark'] }));
-  for (const entry of [cases[0], cases[2], cases[4], cases[5]]) {
+  for (const entry of cases.filter(entry => ['vertical fold', 'normal flow fold', 'unreachable top', 'unreachable top with positive overflow', 'permanent clip'].includes(entry.name))) {
     const file = resolve(directory, `${entry.name.replaceAll(' ', '-')}.html`);
     await writeFile(file, fixture(entry));
     let stdout: string;
