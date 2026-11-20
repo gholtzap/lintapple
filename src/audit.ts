@@ -315,6 +315,13 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('nested-radius', inner, innerValues[0], `${Number((expected / innerScale.x).toFixed(2))}px inner radius`, 'Set the inner radius to max(0px, outer radius minus the inset). The inset includes the border.');
   }
   const styleOf = (el: Element) => styles.get(el) ?? getComputedStyle(el);
+  const hasVisuallyHiddenClip = (el: Element) => {
+    const style = styleOf(el);
+    return el instanceof HTMLElement && style.display !== 'contents' &&
+      (style.position === 'absolute' || style.position === 'fixed') && style.overflow === 'hidden' &&
+      (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)') &&
+      el.offsetWidth <= 1 && el.offsetHeight <= 1;
+  };
   const scrolls = (node: Element, axis: 'X' | 'Y') => node.clientWidth > 0 && node.clientHeight > 0 && !['inline', 'contents'].includes(styleOf(node).display) && /^(auto|scroll)$/.test(styleOf(node)[`overflow${axis}`]);
   const scrollsWithin = (ancestors: Element[], clip: Pick<Clip, 'element' | 'bounds'>, axis: 'X' | 'Y') => {
     for (const node of ancestors) {
@@ -449,8 +456,10 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
     const context = contextFor(el);
+    // Check the current style so text that appears on focus can still fail.
+    const checkClipping = context.clips.length > 0 && !context.ancestors.some(hasVisuallyHiddenClip);
     const generated = generatedTextRects(el);
-    if (generated === null && context.clips.length)
+    if (generated === null && checkClipping)
       add('content-clipping', el, 'generated text geometry could not be measured', 'text lines inside the clipping area', 'Review the generated text and its clipping area.', undefined, { status: 'unresolved' });
     const rects = [...textRects(el), ...(generated ?? [])];
     const escaped = new Map<string, number>();
@@ -477,6 +486,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       if (overflow.size)
         add('content-overflow', el, [...overflow].map(([edge, amount]) => `${edge} text overflow ${Number(amount.toFixed(2))}px`).join(', '), 'text inside the nearest data-ui-content container', 'Let text wrap or provide a local scroll region inside the marked container.', container);
     }
+    if (!checkClipping) continue;
     for (const clip of context.clips) {
       const cut = new Map<string, number>();
       for (const rect of rects) for (const [edge, distance] of outside(clip.bounds, rect, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y')))
