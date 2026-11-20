@@ -7,16 +7,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const container of policy.controlContainers) document.querySelector(container);
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
   const findings: Finding[] = [];
-  const selector = (element: Element) => {
-    const parts: string[] = [];
-    for (let node: Element | null = element; node; node = node.parentElement) {
-      const tag = node.tagName.toLowerCase();
-      if (node === document.documentElement) { parts.unshift(tag); break; }
-      const siblings = [...node.parentElement!.children].filter(s => s.tagName === node.tagName);
-      parts.unshift(`${tag}:nth-of-type(${siblings.indexOf(node) + 1})`);
-    }
-    return parts.join(' > ');
-  };
   const add: AddFinding = (rule, element, actual, expected, fix, related, details = {}) => {
     const pseudo = details.selector?.match(/::[\w-]+$/)?.[0];
     const exception = policy.exceptions.find(e => e.rules.includes(rule) && (element.matches(e.selector) || !!pseudo && e.selector.endsWith(pseudo) && element.matches(e.selector.slice(0, -pseudo.length))));
@@ -24,8 +14,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
   const suppressed: SuppressedFinding[] = [];
-  const { textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
-  const elements = [...document.querySelectorAll('body, body *')].filter(visible);
+  const { parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
+  const elements = [document.body, ...descendants(document.body)].filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
@@ -118,9 +108,9 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         add('copy', el, phrase, 'text without prohibited phrases', 'Remove the phrase or use specific text that helps the user.');
     }
   }
-  const groups = new Map<Element | null, Element[]>();
+  const groups = new Map<Node, Element[]>();
   for (const el of controls) {
-    const parent = el.closest('[data-ui-actions]') ?? el.parentElement;
+    const parent = el.closest('[data-ui-actions]') ?? el.parentElement ?? el.getRootNode();
     const list = groups.get(parent) ?? [];
     list.push(el); groups.set(parent, list);
   }
@@ -138,10 +128,10 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
   const layoutChildren = (el: Element): Element[] => [...el.children].flatMap(child =>
     getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
-  for (const el of [...document.querySelectorAll('[data-ui-stack]')].filter(hasVisibleContent))
+  for (const el of elements.filter(el => el.matches('[data-ui-stack]')).filter(hasVisibleContent))
     checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
   let alignmentGroups = 0;
-  for (const group of [...document.querySelectorAll('[data-ui-align]')].filter(hasVisibleContent)) {
+  for (const group of elements.filter(el => el.matches('[data-ui-align]')).filter(hasVisibleContent)) {
     const alignment = group.getAttribute('data-ui-align');
     const items = [...group.querySelectorAll('[data-ui-align-item]')].filter(el => el.closest('[data-ui-align]') === group);
     if (!['start', 'center', 'end'].includes(alignment ?? '') || items.length < 2) {
@@ -171,7 +161,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   });
   const transformFor = (container: Element) => {
     let transform = new DOMMatrix();
-    for (let node: Element | null = container; node; node = node.parentElement) {
+    for (let node: Element | null = container; node; node = parent(node)) {
       const style = getComputedStyle(node);
       let matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
       const [x, y = x] = style.scale === 'none' ? [1, 1] : style.scale.split(/\s+/).map(Number);
@@ -237,7 +227,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   let insetControls = 0;
   for (const el of controls) {
-    const container = el.parentElement!.closest(policy.controlContainers.join(', '));
+    const container = parent(el)?.closest(policy.controlContainers.join(', '));
     if (!container || !visible(container)) continue;
     insetControls++;
     const innerBounds = clientBounds(container);
@@ -284,7 +274,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         if (el.closest('svg') && !el.matches('svg')) continue;
         const style = getComputedStyle(el);
         let clipped = false;
-        for (let node: Element | null = el; node; node = node.parentElement) {
+        for (let node: Element | null = el; node; node = parent(node)) {
           const item = getComputedStyle(node);
           if (item.clip !== 'auto' || item.clipPath !== 'none') { clipped = true; break; }
           if (node === container) break;
@@ -353,7 +343,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const ancestors: Element[] = [];
     let containingBlock: Element | null = null;
     let overlay = false;
-    for (let node: Element | null = el; node; node = node.parentElement) {
+    for (let node: Element | null = el; node; node = parent(node)) {
       overlay ||= styleOf(node).position === 'fixed' || node.matches('dialog[open], [role="dialog"], [role="alertdialog"], [role="tooltip"], [data-ui-overlay]');
       // Overflow below an absolute box's containing block cannot clip that box.
       if (containingBlock && node !== containingBlock) continue;
@@ -540,7 +530,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const el = node.element;
       if (!inScope.has(el) || !visible(el) || el.closest('button:disabled, [aria-disabled="true"]')) continue;
       if (el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) continue;
-      if (svgContrast.some(result => document.querySelector(result.selector) === el)) continue;
+      if (svgContrast.some(result => resolveSelector(result.selector) === el)) continue;
       const check = [...node.any, ...node.all, ...node.none].find(check => check.id === 'color-contrast');
       const data = check?.data ?? {};
       reportContrast(el, status, data, check?.message ?? node.failureSummary);
@@ -548,7 +538,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   }
   for (const result of svgContrast) {
     if (result.status === 'passed') continue;
-    const el = document.querySelector(result.selector);
+    const el = resolveSelector(result.selector);
     if (!el || !inScope.has(el)) continue;
     reportContrast(el, result.status, { expectedContrastRatio: `${result.required}:1`, contrastRatio: result.contrastRatio, fgColor: result.fgColor, bgColor: result.bgColor }, result.reason);
   }
@@ -561,9 +551,9 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const required = parseFloat(style.fontSize) >= 24 || (parseFloat(style.fontWeight) >= 700 && parseFloat(style.fontSize) >= 56 / 3) ? 3 : 4.5;
       const data = { expectedContrastRatio: `${required}:1` };
       const rects = textRects(el);
-      let box = el.parentElement, unsupported = false;
-      while (box && rects.some(rect => outside(box!.getBoundingClientRect(), rect, true, true).length)) box = box.parentElement;
-      for (let node: Element | null = el; node; node = node.parentElement) {
+      let box = parent(el), unsupported = false;
+      while (box && rects.some(rect => outside(box!.getBoundingClientRect(), rect, true, true).length)) box = parent(box);
+      for (let node: Element | null = el; node; node = parent(node)) {
         const nodeStyle = styleOf(node);
         if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal' || nodeStyle.textShadow !== 'none' || parseFloat(nodeStyle.webkitTextStrokeWidth) > 0) unsupported = true;
         if (box && node !== box && box.contains(node) && nodeStyle.display !== 'contents') {
@@ -604,7 +594,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const required = size >= 24 || (bold && size >= 56 / 3) ? 3 : 4.5;
       const data = { expectedContrastRatio: `${required}:1` };
       let unsupported = false;
-      for (let node: Element | null = el; node; node = node.parentElement) {
+      for (let node: Element | null = el; node; node = parent(node)) {
         const nodeStyle = getComputedStyle(node);
         if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
       }
