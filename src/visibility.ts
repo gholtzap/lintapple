@@ -22,6 +22,16 @@ export function createVisibility() {
     }
     return element;
   };
+  const visuallyHidden = (el: Element) => {
+    for (let node: Element | null = el; node; node = parent(node)) {
+      const style = getComputedStyle(node);
+      if (node instanceof HTMLElement && style.display !== 'contents' &&
+          (style.position === 'absolute' || style.position === 'fixed') && style.overflow === 'hidden' &&
+          (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)') &&
+          node.offsetWidth <= 1 && node.offsetHeight <= 1) return true;
+    }
+    return false;
+  };
   const textRects = (el: Element) => {
     const rects: DOMRect[] = [];
     for (const node of el.childNodes) {
@@ -93,5 +103,5 @@ export function createVisibility() {
     return true;
   };
   const hasVisibleContent = (el: Element | null | undefined): boolean => !!el?.isConnected && (visible(el) || descendants(el).some(visible));
-  return { parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles };
+  return { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles };
 }

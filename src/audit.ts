@@ -14,7 +14,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
   };
   const suppressed: SuppressedFinding[] = [];
-  const { parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
+  const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const allElements = document.body ? [document.body, ...descendants(document.body)] : [];
   const elements = allElements.filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
@@ -27,8 +27,15 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
     dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
+  const loadedImages = new Set<Element>();
+  await Promise.all(elements.filter(el => el.matches('input[type="image"][src]')).map(async el => {
+    const image = new Image();
+    image.src = (el as HTMLInputElement).src;
+    try { await image.decode(); loadedImages.add(el); } catch { /* A failed image can paint its alternate text. */ }
+  }));
   const isText = (el: Element) => textRects(el).length > 0 || el.matches('textarea, select') ||
-    el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type);
+    el instanceof HTMLOptionElement && el.text.trim().length > 0 && !!el.closest('select')?.matches('select[multiple], select[size]:not([size="0"]):not([size="1"])') ||
+    el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type) && !loadedImages.has(el);
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
     const tooltip = el.closest('[role="tooltip"]');
@@ -51,6 +58,24 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = getComputedStyle(el, '::placeholder');
     return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? style : null;
   };
+  const textPseudos = (el: Element) => {
+    const pseudos: string[] = [];
+    if (el.matches('input[type="file"]')) pseudos.push('::file-selector-button');
+    const style = styles.get(el)!;
+    if (style.display === 'list-item') {
+      const marker = getComputedStyle(el, '::marker');
+      if (!['none', 'normal', '""'].includes(marker.content) || marker.content === 'normal' && style.listStyleImage === 'none' && /^(decimal|lower-|upper-)/.test(style.listStyleType)) pseudos.push('::marker');
+    }
+    if (['block', 'list-item', 'inline-block', 'flow-root', 'table-cell', 'table-caption'].includes(style.display)) pseudos.push('::first-letter', '::first-line');
+    return pseudos.flatMap(pseudo => {
+      const style = getComputedStyle(el, pseudo);
+      if (['::first-letter', '::first-line'].includes(pseudo)) {
+        if (style.fontFamily === styles.get(el)!.fontFamily && style.fontSize === styles.get(el)!.fontSize) return [];
+        if (![el, ...el.querySelectorAll('*')].some(node => visible(node) && textRects(node).length > 0)) return [];
+      }
+      return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? [{ pseudo, style }] : [];
+    });
+  };
   const hasTabularNumbers = (style: CSSStyleDeclaration) => {
     const feature = style.fontFeatureSettings.match(/['"]tnum['"](?:\s+(\d+|on|off))?(?=\s*,|$)/)?.[1];
     return /['"]tnum['"]/.test(style.fontFeatureSettings) ? feature !== 'off' && feature !== '0' : style.fontVariantNumeric.split(/\s+/).includes('tabular-nums');
@@ -58,11 +83,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el)!;
-    if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
-    if (!el.closest('pre, code, kbd, samp'))
-      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
+    if (!visuallyHidden(el) && isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
+    if (!visuallyHidden(el) && !el.closest('pre, code, kbd, samp'))
+      for (const { pseudo, style: textStyle } of [...generatedTextStyles(el), ...textPseudos(el)]) checkFont(el, textStyle, pseudo);
     const placeholder = placeholderStyle(el);
-    if (placeholder && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
+    if (placeholder && !visuallyHidden(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
@@ -186,7 +211,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     return { x: width ? bounds.width / width : Math.hypot(transform.a, transform.b), y: height ? bounds.height / height : Math.hypot(transform.c, transform.d) };
   };
   // One client-box primitive for control insets and text clipping.
-  const clientBounds = (container: Element, box: 'padding-box' | 'content-box' | 'border-box' = 'padding-box') => {
+  const clientBounds = (container: Element, box: 'padding-box' | 'content-box' | 'border-box' = 'padding-box', inset = [0, 0, 0, 0]) => {
     const bounds = container.getBoundingClientRect();
     // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
     const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
@@ -209,6 +234,9 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       clientWidth -= parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
       clientHeight -= parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     }
+    clientLeft += inset[3]; clientTop += inset[0];
+    clientWidth = Math.max(0, clientWidth - inset[1] - inset[3]);
+    clientHeight = Math.max(0, clientHeight - inset[0] - inset[2]);
     const transform = transformFor(container);
     const projectedWidth = Math.abs(transform.a) * width + Math.abs(transform.c) * height;
     const projectedHeight = Math.abs(transform.b) * width + Math.abs(transform.d) * height;
@@ -321,13 +349,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('nested-radius', inner, innerValues[0], `${Number((expected / innerScale.x).toFixed(2))}px inner radius`, 'Set the inner radius to max(0px, outer radius minus the inset). The inset includes the border.');
   }
   const styleOf = (el: Element) => styles.get(el) ?? getComputedStyle(el);
-  const hasVisuallyHiddenClip = (el: Element) => {
-    const style = styleOf(el);
-    return el instanceof HTMLElement && style.display !== 'contents' &&
-      (style.position === 'absolute' || style.position === 'fixed') && style.overflow === 'hidden' &&
-      (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)') &&
-      el.offsetWidth <= 1 && el.offsetHeight <= 1;
-  };
   const scrolls = (node: Element, axis: 'X' | 'Y') => node.clientWidth > 0 && node.clientHeight > 0 && !['inline', 'contents'].includes(styleOf(node).display) && /^(auto|scroll)$/.test(styleOf(node)[`overflow${axis}`]);
   const scrollsWithin = (ancestors: Element[], clip: Pick<Clip, 'element' | 'bounds'>, axis: 'X' | 'Y') => {
     for (const node of ancestors) {
@@ -387,15 +408,30 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       textScrollY: ancestors.some(node => scrolls(node, 'Y') && node !== document.body && node !== document.documentElement),
     };
   };
+  const shapeBounds = (el: Element): Bounds | null => {
+    const value = styleOf(el).clipPath;
+    if (value === 'none') return null;
+    const match = /^inset\(([^()]*)\)(?: border-box)?$/.exec(value);
+    const values = match?.[1].split(/\s+round\s+/)[0].trim().split(/\s+/);
+    if (!(el instanceof HTMLElement) || !values?.length || values.length > 4 || values.some(value => !/^-?[\d.]+(?:px|%)$/.test(value))) return null;
+    const [top, right = top, bottom = top, left = right] = values;
+    const inset = [top, right, bottom, left].map((value, index) => parseFloat(value) * (value.endsWith('%') ? (index % 2 ? el.offsetWidth : el.offsetHeight) / 100 : 1));
+    return clientBounds(el, 'border-box', inset);
+  };
   const reachableSize = (el: Element) => {
     let { left, right, top, bottom } = el.getBoundingClientRect();
     const { ancestors, clips } = contextFor(el);
-    let maxWidth = right - left, maxHeight = bottom - top;
+    const ownShape = shapeBounds(el);
+    if (ownShape) {
+      left = Math.max(left, ownShape.left); right = Math.min(right, ownShape.right);
+      top = Math.max(top, ownShape.top); bottom = Math.min(bottom, ownShape.bottom);
+    }
+    let maxWidth = Math.max(0, right - left), maxHeight = Math.max(0, bottom - top);
     // Carry reachable positions out through nested scrollports without scrolling the app.
     for (const node of ancestors.slice(1)) {
       const scrollX = scrolls(node, 'X'), scrollY = scrolls(node, 'Y');
-      const clip = clips.find(clip => clip.element === node);
-      if (!scrollX && !scrollY && !clip) continue;
+      const clip = clips.find(clip => clip.element === node), shape = shapeBounds(node);
+      if (!scrollX && !scrollY && !clip && !shape) continue;
       const style = styleOf(node), bounds = clientBounds(node), transform = transformFor(node);
       const vertical = style.writingMode !== 'horizontal-tb';
       let reverseX = vertical ? style.writingMode.endsWith('-rl') : style.direction === 'rtl';
@@ -429,13 +465,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         if (swapped ? clip.y : clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
         if (swapped ? clip.x : clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
       }
+      if (shape) {
+        left = Math.max(left, shape.left); right = Math.min(right, shape.right);
+        top = Math.max(top, shape.top); bottom = Math.min(bottom, shape.bottom);
+      }
       maxWidth = Math.min(maxWidth, Math.max(0, right - left));
       maxHeight = Math.min(maxHeight, Math.max(0, bottom - top));
     }
-    return { width: maxWidth, height: maxHeight };
+    const unresolved = ancestors.some(node => styleOf(node).clipPath !== 'none' && !shapeBounds(node));
+    return { width: maxWidth, height: maxHeight, unresolved };
   };
   for (const el of controls) {
     const rect = reachableSize(el);
+    if (rect.unresolved) add('control-size', el, 'clip-path hit area could not be measured', 'a measurable control hit area', 'Review the clipped control hit area.', undefined, { status: 'unresolved' });
     const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
     if (rect.width + 0.1 < minimum || rect.height + 0.1 < minimum)
       add('control-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `at least ${minimum}px in each dimension`, 'Increase the control hit area.');
@@ -444,6 +486,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const rule = policy.iconSizeRules.find(rule => el.matches(rule.selector));
     if (!rule) continue;
     const rect = reachableSize(el);
+    if (rect.unresolved) add('icon-size', el, 'clip-path bounds could not be measured', 'measurable icon bounds', 'Review the clipped icon bounds.', undefined, { status: 'unresolved' });
     if (!rule.sizes.some(size => Math.abs(rect.width - size) <= 0.1 && Math.abs(rect.height - size) <= 0.1))
       add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
   }
@@ -460,7 +503,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
     const context = contextFor(el);
     // Check the current style so text that appears on focus can still fail.
-    const checkClipping = context.clips.length > 0 && !context.ancestors.some(hasVisuallyHiddenClip);
+    const checkClipping = context.clips.length > 0 && !visuallyHidden(el);
     const generated = generatedTextRects(el);
     if (generated === null && checkClipping)
       add('content-clipping', el, 'generated text geometry could not be measured', 'text lines inside the clipping area', 'Review the generated text and its clipping area.', undefined, { status: 'unresolved' });
