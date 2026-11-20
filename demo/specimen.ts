@@ -1,0 +1,80 @@
+import type { ExampleState } from './types.js';
+import { rules } from './rules.js';
+import { openTooltip, closeTooltip } from './tooltips.js';
+
+const params = new URLSearchParams(location.search);
+const rule = rules.find(item => item.id === params.get('rule'));
+const state = params.get('state');
+const theme = params.get('theme');
+const specimen = document.querySelector<HTMLElement>('.specimen')!;
+document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+document.body.dataset.state = state ?? '';
+if (!rule || (state !== 'before' && state !== 'after') || (theme !== 'light' && theme !== 'dark')) {
+  document.title = 'Invalid rule example';
+  specimen.textContent = 'Select a valid rule, state, and theme.';
+} else {
+  specimen.innerHTML = rule.html;
+  const style = document.createElement('style');
+  document.head.append(style);
+  let selectedState: ExampleState = state;
+  let transition: ViewTransition | undefined;
+  const applyState = () => {
+    style.textContent = rule[selectedState];
+    document.body.dataset.state = selectedState;
+    document.title = `${rule.title} — ${selectedState}`;
+    specimen.setAttribute('aria-label', `${rule.title}: ${selectedState}`);
+    params.set('state', selectedState);
+    history.replaceState(null, '', `?${params}`);
+  };
+  applyState();
+  const filter = specimen.querySelector<HTMLDetailsElement>('.file-filter');
+  filter?.addEventListener('click', event => {
+    const option = (event.target as Element).closest('button');
+    if (!option) return;
+    filter.querySelector('summary span')!.textContent = option.textContent;
+    filter.open = false;
+    filter.querySelector('summary')!.focus();
+  });
+  filter?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { filter.open = false; filter.querySelector('summary')!.focus(); }
+  });
+  const revealTooltip = () => {
+    const trigger = specimen.querySelector<HTMLElement>('#download-trigger');
+    if (trigger) openTooltip(trigger);
+  };
+  window.dismissExampleTooltip = closeTooltip;
+  window.setExampleState = nextState => {
+    if (!['before', 'after'].includes(nextState)) return;
+    if (nextState === selectedState) { revealTooltip(); return; }
+    selectedState = nextState;
+    transition?.skipTransition();
+    const update = () => { applyState(); revealTooltip(); };
+    if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      transition = document.startViewTransition(update);
+      transition.ready.catch(() => {});
+    } else update();
+  };
+  if (rule.id === 'content-overflow') {
+    specimen.setAttribute('data-ui-stack', '');
+    const panel = specimen.querySelector<HTMLElement>('.resize-panel')!;
+    const input = specimen.querySelector<HTMLInputElement>('#example-width')!;
+    const output = specimen.querySelector('#width-value')!;
+    const update = () => {
+      input.max = String(Math.floor(specimen.getBoundingClientRect().width));
+      input.value = String(Math.round(panel.getBoundingClientRect().width));
+      output.textContent = `${input.value} px`;
+    };
+    input.addEventListener('input', () => { panel.style.width = `${input.value}px`; update(); });
+    const observer = new ResizeObserver(update);
+    observer.observe(panel);
+    observer.observe(specimen);
+    update();
+    const requestedWidth = Number(params.get('width'));
+    if (Number.isInteger(requestedWidth) && requestedWidth > 0) {
+      input.value = String(requestedWidth);
+      panel.style.width = `${input.value}px`;
+      update();
+    }
+  }
+}
+document.body.dataset.ready = 'true';

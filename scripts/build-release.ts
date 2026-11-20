@@ -1,0 +1,58 @@
+import { cp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { resolve, join, dirname, basename, relative, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = await realpath(fileURLToPath(new URL('../../', import.meta.url)));
+const output = join(root, 'dist');
+const stage = resolve(process.argv[2] || join(root, 'test-results/production-stage'));
+const canonical = async (path: string): Promise<string> => {
+  try { return await realpath(path); }
+  catch (error) {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error;
+    return join(await canonical(dirname(path)), basename(path));
+  }
+};
+const destination = await canonical(stage);
+const within = (parent: string, child: string) => { const path = relative(parent, child); return !path || path !== '..' && !path.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(path); };
+if (within(destination, root) || ['dist', 'src', 'scripts', 'demo', 'examples', 'node_modules'].some(input => within(join(root, input), destination)))
+  throw new Error('Use a separate directory for the release.');
+const pkg: { version: string } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+execFileSync(process.execPath, [join(output, 'scripts/highlight-demo.js')], { cwd: root });
+await mkdir(join(stage, 'downloads'), { recursive: true });
+await rm(join(stage, 'demo'), { recursive: true, force: true });
+await cp(join(output, 'demo'), join(stage, 'demo'), { recursive: true });
+await writeFile(join(stage, 'demo/index.html'), (await readFile(join(stage, 'demo/index.html'), 'utf8')).replace('<base href="/demo/">', '<base href="/">'));
+await mkdir(join(stage, 'examples'), { recursive: true });
+await cp(join(root, 'examples/ui.css'), join(stage, 'examples/ui.css'));
+await cp(join(root, 'README.md'), join(stage, 'README.md'));
+const packages: { filename: string; integrity: string }[] = JSON.parse(execFileSync('npm', ['pack', '--silent', '--json', '--pack-destination', join(stage, 'downloads')], { cwd: root, encoding: 'utf8' }));
+const packed = packages[0];
+const hashes: Record<string, string> = {};
+const scan = async (directory: string): Promise<void> => {
+  for (const entry of await readdir(join(stage, directory), { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await scan(path);
+    else hashes[path] = createHash('sha256').update(await readFile(join(stage, path))).digest('hex');
+  }
+};
+for (const directory of ['demo', 'examples', 'downloads']) await scan(directory);
+const release = { version: pkg.version, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), package: `downloads/${packed.filename}`, packageIntegrity: packed.integrity, hashes };
+await writeFile(join(stage, 'release.json'), JSON.stringify(release, null, 2));
+await writeFile(join(stage, 'vercel.json'), JSON.stringify({
+  redirects: [
+    { source: '/', has: [{ type: 'host', value: 'lintapple-demo.vercel.app' }], destination: 'https://lintapple.vercel.app/', permanent: true },
+    { source: '/demo', destination: '/', permanent: true },
+    { source: '/demo/', destination: '/', permanent: true },
+    { source: '/demo/:path*', destination: '/:path*', permanent: true },
+    { source: '/:path*', has: [{ type: 'host', value: 'lintapple-demo.vercel.app' }], destination: 'https://lintapple.vercel.app/:path*', permanent: true },
+  ],
+  rewrites: [
+    { source: '/', destination: '/demo/index.html' },
+    { source: '/rule/:id', destination: '/demo/index.html' },
+    ...Object.keys(hashes).filter(path => path.startsWith('demo/')).map(path => ({ source: `/${path.slice(5)}`, destination: `/${path}` })),
+  ],
+  headers: [{ source: '/(.*)', headers: [{ key: 'Cache-Control', value: 'no-store' }] }],
+}, null, 2));
+console.log(JSON.stringify({ stage, version: pkg.version, sourceCommit: release.sourceCommit, package: release.package, files: Object.keys(hashes).length }));

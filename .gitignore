@@ -7,3 +7,5 @@ site-demo/
 .env
 .env.*
 !.env.example
+
+dist/
