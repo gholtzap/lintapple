@@ -43,6 +43,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     try { await image.decode(); loadedImages.add(el); } catch { /* A failed image can paint its alternate text. */ }
   }));
   const isText = (el: Element) => textRects(el).length > 0 || el.matches('textarea, select') ||
+    el instanceof HTMLOptionElement && el.text.trim().length > 0 && !!el.closest('select')?.matches('select[multiple], select[size]:not([size="0"]):not([size="1"])') ||
     el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type) && !loadedImages.has(el);
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
@@ -66,6 +67,24 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = getComputedStyle(el, '::placeholder');
     return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? style : null;
   };
+  const textPseudos = (el: Element) => {
+    const pseudos: string[] = [];
+    if (el.matches('input[type="file"]')) pseudos.push('::file-selector-button');
+    const style = styles.get(el)!;
+    if (style.display === 'list-item') {
+      const marker = getComputedStyle(el, '::marker');
+      if (!['none', 'normal', '""'].includes(marker.content) || marker.content === 'normal' && style.listStyleImage === 'none' && /^(decimal|lower-|upper-)/.test(style.listStyleType)) pseudos.push('::marker');
+    }
+    if (['block', 'list-item', 'inline-block', 'flow-root', 'table-cell', 'table-caption'].includes(style.display)) pseudos.push('::first-letter', '::first-line');
+    return pseudos.flatMap(pseudo => {
+      const style = getComputedStyle(el, pseudo);
+      if (['::first-letter', '::first-line'].includes(pseudo)) {
+        if (style.fontFamily === styles.get(el)!.fontFamily && style.fontSize === styles.get(el)!.fontSize) return [];
+        if (![el, ...el.querySelectorAll('*')].some(node => visible(node) && textRects(node).length > 0)) return [];
+      }
+      return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? [{ pseudo, style }] : [];
+    });
+  };
   const hasTabularNumbers = (style: CSSStyleDeclaration) => {
     const feature = style.fontFeatureSettings.match(/['"]tnum['"](?:\s+(\d+|on|off))?(?=\s*,|$)/)?.[1];
     return /['"]tnum['"]/.test(style.fontFeatureSettings) ? feature !== 'off' && feature !== '0' : style.fontVariantNumeric.split(/\s+/).includes('tabular-nums');
@@ -75,7 +94,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = styles.get(el)!;
     if (!visuallyHidden(el) && isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
     if (!visuallyHidden(el) && !el.closest('pre, code, kbd, samp'))
-      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
+      for (const { pseudo, style: textStyle } of [...generatedTextStyles(el), ...textPseudos(el)]) checkFont(el, textStyle, pseudo);
     const placeholder = placeholderStyle(el);
     if (placeholder && !visuallyHidden(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
