@@ -1,7 +1,29 @@
 // Runs in the browser. A semantic group can be visible without its own box.
 export function createVisibility() {
-  const visuallyHidden = (el: Element) => {
+  const parent = (el: Element): Element | null => el.assignedSlot ?? el.parentElement ?? (el.getRootNode() instanceof ShadowRoot ? (el.getRootNode() as ShadowRoot).host : null);
+  const descendants = (root: Element | Document | ShadowRoot): Element[] => [...root.querySelectorAll('*')].flatMap(el => [el, ...(el.shadowRoot ? descendants(el.shadowRoot) : [])]);
+  const selector = (el: Element): string => {
+    const parts: string[] = [];
     for (let node: Element | null = el; node; node = node.parentElement) {
+      const tag = node.tagName.toLowerCase();
+      const root = node.getRootNode() as Document | ShadowRoot;
+      if (node === document.documentElement) { parts.unshift(tag); break; }
+      const siblings = [...(node.parentElement ?? root).children].filter(other => other.tagName === node!.tagName);
+      parts.unshift(`${tag}:nth-of-type(${siblings.indexOf(node) + 1})`);
+      if (!node.parentElement && root instanceof ShadowRoot) return `${selector(root.host)} >> :scope > ${parts.join(' > ')}`;
+    }
+    return parts.join(' > ');
+  };
+  const resolveSelector = (value: string): Element | null => {
+    let root: Document | ShadowRoot | null = document, element: Element | null = null;
+    for (const part of value.split(' >> ')) {
+      element = root?.querySelector(part.replace(/^:scope > /, '')) ?? null;
+      root = element?.shadowRoot ?? null;
+    }
+    return element;
+  };
+  const visuallyHidden = (el: Element) => {
+    for (let node: Element | null = el; node; node = parent(node)) {
       const style = getComputedStyle(node);
       if (node instanceof HTMLElement && style.display !== 'contents' &&
           (style.position === 'absolute' || style.position === 'fixed') && style.overflow === 'hidden' &&
@@ -45,19 +67,20 @@ export function createVisibility() {
       const attribute = 'data-lintapple-measure';
       const previous = el.getAttribute(attribute);
       const token = Math.random().toString(36).slice(2);
-      const sheets = [...document.adoptedStyleSheets];
+      const root = el.getRootNode() as Document | ShadowRoot;
+      const sheets = [...root.adoptedStyleSheets];
       const sheet = new CSSStyleSheet();
       sheet.replaceSync(`[${attribute}="${token}"]${pseudo}{content:none!important}[${attribute}="${token}-text"]::before,[${attribute}="${token}-text"]::after{content:none!important}`);
       span.setAttribute(attribute, `${token}-text`);
       try {
         el.setAttribute(attribute, token);
-        document.adoptedStyleSheets = [...sheets, sheet];
+        root.adoptedStyleSheets = [...sheets, sheet];
         if (getComputedStyle(el, pseudo).content !== 'none') { unresolved = true; return []; }
         el.insertBefore(span, pseudo === '::before' ? el.firstChild : null);
         return textRects(span);
       } finally {
         span.remove();
-        document.adoptedStyleSheets = sheets;
+        root.adoptedStyleSheets = sheets;
         if (previous === null) el.removeAttribute(attribute); else el.setAttribute(attribute, previous);
       }
     });
@@ -69,16 +92,16 @@ export function createVisibility() {
     const boxVisible = el.checkVisibility({ checkVisibilityCSS: true }) && bounds.width > 0 && bounds.height > 0;
     if (!boxVisible && !generatedTextStyles(el).length && (getComputedStyle(el).visibility !== 'visible' || !textRects(el).length)) return false;
     // Boxless elements can paint text. Opacity applies only to ancestor boxes.
-    for (let node: Element | null = el; node; node = node.parentElement) {
+    for (let node: Element | null = el; node; node = parent(node)) {
       const style = getComputedStyle(node);
       if (node instanceof HTMLDetailsElement && !node.open && el !== node) {
         const summary: Element | undefined = [...node.children].find(child => child.tagName === 'SUMMARY');
         if (!summary?.contains(el)) return false;
       }
-      if (style.display === 'none' || (style.display !== 'contents' && (style.contentVisibility === 'hidden' || parseFloat(style.opacity) === 0))) return false;
+      if (node.hasAttribute('inert') || style.display === 'none' || (style.display !== 'contents' && (style.contentVisibility === 'hidden' || parseFloat(style.opacity) === 0))) return false;
     }
     return true;
   };
-  const hasVisibleContent = (el: Element | null | undefined): boolean => !!el?.isConnected && (visible(el) || [...el.querySelectorAll('*')].some(visible));
-  return { visuallyHidden, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles };
+  const hasVisibleContent = (el: Element | null | undefined): boolean => !!el?.isConnected && (visible(el) || descendants(el).some(visible));
+  return { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles };
 }

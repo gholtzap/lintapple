@@ -8,6 +8,8 @@ It should be impossible for AI to make a bad UI.
 
 [npm](https://www.npmjs.com/package/lintapple) · [Demo](https://lintapple.vercel.app/)
 
+Page checks include open shadow roots. Finding selectors use Playwright's `>> :scope >` path to name elements inside them. Native CSS selectors in policies still follow each root's CSS scope. Closed shadow roots are not accessible to the checker.
+
 ## Install
 
 Requires Node.js 22 or later. Run in your app’s project directory:
