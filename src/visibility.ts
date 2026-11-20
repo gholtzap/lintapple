@@ -29,7 +29,6 @@ export function createVisibility() {
           (style.position === 'absolute' || style.position === 'fixed') && style.overflow === 'hidden' &&
           (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)') &&
           node.offsetWidth <= 1 && node.offsetHeight <= 1) return true;
-      if (node instanceof HTMLElement && style.position === 'fixed' && !node.offsetParent) break;
     }
     return false;
   };
