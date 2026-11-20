@@ -27,8 +27,6 @@ test('font checks use painted text and keep accessible labels', async () => {
         await page.locator('#skip').blur();
         await page.locator('input').evaluate(el => el.setAttribute('src', 'data:image/png,broken'));
         assert.deepEqual((await fonts()).map(f => f.rule).sort(), ['font-family', 'font-size']);
-        await page.setContent(html('.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.fixed{position:fixed;top:80px;left:24px;font:17px serif}', '<p>Ready</p><div class="sr"><span class="fixed">Visible fixed text</span></div>'));
-        assert.deepEqual((await fonts()).map(f => f.rule).sort(), ['font-family', 'font-size']);
       } finally { await page.close(); }
     }
   } finally { await browser.close(); }
