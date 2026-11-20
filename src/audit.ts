@@ -15,7 +15,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   const suppressed: SuppressedFinding[] = [];
   const { parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
-  const elements = [document.body, ...descendants(document.body)].filter(visible);
+  const allElements = document.body ? [document.body, ...descendants(document.body)] : [];
+  const elements = allElements.filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
@@ -128,10 +129,10 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
   const layoutChildren = (el: Element): Element[] => [...el.children].flatMap(child =>
     getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
-  for (const el of elements.filter(el => el.matches('[data-ui-stack]')).filter(hasVisibleContent))
+  for (const el of allElements.filter(el => el.matches('[data-ui-stack]')).filter(hasVisibleContent))
     checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
   let alignmentGroups = 0;
-  for (const group of elements.filter(el => el.matches('[data-ui-align]')).filter(hasVisibleContent)) {
+  for (const group of allElements.filter(el => el.matches('[data-ui-align]')).filter(hasVisibleContent)) {
     const alignment = group.getAttribute('data-ui-align');
     const items = [...group.querySelectorAll('[data-ui-align-item]')].filter(el => el.closest('[data-ui-align]') === group);
     if (!['start', 'center', 'end'].includes(alignment ?? '') || items.length < 2) {
