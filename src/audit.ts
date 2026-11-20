@@ -173,9 +173,12 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     let transform = new DOMMatrix();
     for (let node: Element | null = container; node; node = node.parentElement) {
       const style = getComputedStyle(node);
-      const matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
+      let matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
       const [x, y = x] = style.scale === 'none' ? [1, 1] : style.scale.split(/\s+/).map(Number);
-      transform = matrix.scale(x, y).multiply(transform);
+      const rotate = /^-?[\d.]+deg$/.test(style.rotate) ? parseFloat(style.rotate) : 0;
+      if (x !== 1 || y !== 1) matrix = new DOMMatrix().scale(x, y).multiply(matrix);
+      if (rotate) matrix = new DOMMatrix().rotate(rotate).multiply(matrix);
+      transform = matrix.multiply(transform);
     }
     return transform;
   };
@@ -197,16 +200,18 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
     const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
     const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : container instanceof SVGSVGElement ? scaleFor(container).y : 1;
+    const width = container instanceof HTMLElement ? container.offsetWidth : bounds.width / scaleX;
+    const height = container instanceof HTMLElement ? container.offsetHeight : bounds.height / scaleY;
     const style = getComputedStyle(container);
     const inline = container instanceof HTMLElement && style.display === 'inline';
     let clientLeft = inline ? parseFloat(style.borderLeftWidth) : container.clientLeft;
     let clientTop = inline ? parseFloat(style.borderTopWidth) : container.clientTop;
-    let clientWidth = inline ? bounds.width / scaleX - clientLeft - parseFloat(style.borderRightWidth) : container.clientWidth;
-    let clientHeight = inline ? bounds.height / scaleY - clientTop - parseFloat(style.borderBottomWidth) : container.clientHeight;
+    let clientWidth = inline ? width - clientLeft - parseFloat(style.borderRightWidth) : container.clientWidth;
+    let clientHeight = inline ? height - clientTop - parseFloat(style.borderBottomWidth) : container.clientHeight;
     if (box === 'border-box') {
       clientLeft = clientTop = 0;
-      clientWidth = bounds.width / scaleX;
-      clientHeight = bounds.height / scaleY;
+      clientWidth = width;
+      clientHeight = height;
     } else if (box === 'content-box') {
       clientLeft += parseFloat(style.paddingLeft);
       clientTop += parseFloat(style.paddingTop);
@@ -214,9 +219,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       clientHeight -= parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     }
     const transform = transformFor(container);
-    const left = transform.a < 0 ? bounds.right - (clientLeft + clientWidth) * scaleX : bounds.left + clientLeft * scaleX;
-    const top = transform.d < 0 ? bounds.bottom - (clientTop + clientHeight) * scaleY : bounds.top + clientTop * scaleY;
-    const result = { left, top, right: left + clientWidth * scaleX, bottom: top + clientHeight * scaleY };
+    const projectedWidth = Math.abs(transform.a) * width + Math.abs(transform.c) * height;
+    const projectedHeight = Math.abs(transform.b) * width + Math.abs(transform.d) * height;
+    const zoomX = projectedWidth ? bounds.width / projectedWidth : 1, zoomY = projectedHeight ? bounds.height / projectedHeight : 1;
+    const originX = transform.e + Math.min(0, transform.a * width) + Math.min(0, transform.c * height);
+    const originY = transform.f + Math.min(0, transform.b * width) + Math.min(0, transform.d * height);
+    const corners = [[clientLeft, clientTop], [clientLeft + clientWidth, clientTop], [clientLeft, clientTop + clientHeight], [clientLeft + clientWidth, clientTop + clientHeight]]
+      .map(([x, y]) => new DOMPoint(x, y).matrixTransform(transform));
+    const result = {
+      left: bounds.left + (Math.min(...corners.map(point => point.x)) - originX) * zoomX,
+      top: bounds.top + (Math.min(...corners.map(point => point.y)) - originY) * zoomY,
+      right: bounds.left + (Math.max(...corners.map(point => point.x)) - originX) * zoomX,
+      bottom: bounds.top + (Math.max(...corners.map(point => point.y)) - originY) * zoomY,
+    };
     if (!Object.values(result).every(Number.isFinite)) throw new Error('A clipping or control container must have a measurable HTML box.');
     return result;
   };
@@ -381,22 +396,16 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       textScrollY: ancestors.some(node => scrolls(node, 'Y') && node !== document.body && node !== document.documentElement),
     };
   };
-  for (const el of controls) {
+  const reachableSize = (el: Element) => {
     let { left, right, top, bottom } = el.getBoundingClientRect();
     const { ancestors, clips } = contextFor(el);
-    let maxWidth = Infinity, maxHeight = Infinity;
-    for (const clip of clips) {
-      if (clip.element === el) continue;
-      if (clip.x && !scrollsWithin(ancestors, clip, 'X')) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
-      if (clip.y && !scrollsWithin(ancestors, clip, 'Y')) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
-    }
-    // A scrollport can expose its scrollable area, but not overflow before its origin.
-    // Read the scroll offsets; do not scroll the app to measure its controls.
+    let maxWidth = right - left, maxHeight = bottom - top;
+    // Carry reachable positions out through nested scrollports without scrolling the app.
     for (const node of ancestors.slice(1)) {
       const scrollX = scrolls(node, 'X'), scrollY = scrolls(node, 'Y');
-      if (!scrollX && !scrollY) continue;
-      const style = styleOf(node), bounds = clientBounds(node), scale = scaleFor(node), transform = transformFor(node);
-      const signX = transform.a < 0 ? -1 : 1, signY = transform.d < 0 ? -1 : 1;
+      const clip = clips.find(clip => clip.element === node);
+      if (!scrollX && !scrollY && !clip) continue;
+      const style = styleOf(node), bounds = clientBounds(node), transform = transformFor(node);
       const vertical = style.writingMode !== 'horizontal-tb';
       let reverseX = vertical ? style.writingMode.endsWith('-rl') : style.direction === 'rtl';
       let reverseY = vertical && ((style.direction === 'rtl') !== (style.writingMode === 'sideways-lr'));
@@ -409,24 +418,33 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
           if (mainX) reverseY = !reverseY; else reverseX = !reverseX;
         }
       }
-      reverseX = reverseX !== (signX < 0);
-      reverseY = reverseY !== (signY < 0);
-      if (scrollX) {
-        maxWidth = Math.min(maxWidth, bounds.right - bounds.left);
-        const range = node.scrollWidth - node.clientWidth;
-        const origin = bounds.left - node.scrollLeft * scale.x * signX;
-        left = Math.max(left, origin - (reverseX ? range : 0) * scale.x);
-        right = Math.min(right, origin + (node.clientWidth + (reverseX ? 0 : range)) * scale.x);
+      const rangeX = scrollX ? node.scrollWidth - node.clientWidth : 0, rangeY = scrollY ? node.scrollHeight - node.clientHeight : 0;
+      const startX = scrollX ? node.scrollLeft : 0, startY = scrollY ? node.scrollTop : 0;
+      const minX = startX - (reverseX ? 0 : rangeX), maxX = startX + (reverseX ? rangeX : 0);
+      const minY = startY - (reverseY ? 0 : rangeY), maxY = startY + (reverseY ? rangeY : 0);
+      const projectedWidth = Math.abs(transform.a) * node.clientWidth + Math.abs(transform.c) * node.clientHeight;
+      const projectedHeight = Math.abs(transform.b) * node.clientWidth + Math.abs(transform.d) * node.clientHeight;
+      const zoomX = projectedWidth ? (bounds.right - bounds.left) / projectedWidth : 1;
+      const zoomY = projectedHeight ? (bounds.bottom - bounds.top) / projectedHeight : 1;
+      left += (Math.min(transform.a * minX, transform.a * maxX) + Math.min(transform.c * minY, transform.c * maxY)) * zoomX;
+      right += (Math.max(transform.a * minX, transform.a * maxX) + Math.max(transform.c * minY, transform.c * maxY)) * zoomX;
+      top += (Math.min(transform.b * minX, transform.b * maxX) + Math.min(transform.d * minY, transform.d * maxY)) * zoomY;
+      bottom += (Math.max(transform.b * minX, transform.b * maxX) + Math.max(transform.d * minY, transform.d * maxY)) * zoomY;
+      const swapped = Math.abs(transform.a) < 1e-8 && Math.abs(transform.d) < 1e-8;
+      if (scrollX || scrollY) {
+        left = Math.max(left, bounds.left); right = Math.min(right, bounds.right);
+        top = Math.max(top, bounds.top); bottom = Math.min(bottom, bounds.bottom);
+      } else if (clip) {
+        if (swapped ? clip.y : clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
+        if (swapped ? clip.x : clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
       }
-      if (scrollY) {
-        maxHeight = Math.min(maxHeight, bounds.bottom - bounds.top);
-        const range = node.scrollHeight - node.clientHeight;
-        const origin = bounds.top - node.scrollTop * scale.y * signY;
-        top = Math.max(top, origin - (reverseY ? range : 0) * scale.y);
-        bottom = Math.min(bottom, origin + (node.clientHeight + (reverseY ? 0 : range)) * scale.y);
-      }
+      maxWidth = Math.min(maxWidth, Math.max(0, right - left));
+      maxHeight = Math.min(maxHeight, Math.max(0, bottom - top));
     }
-    const rect = { width: Math.min(maxWidth, Math.max(0, right - left)), height: Math.min(maxHeight, Math.max(0, bottom - top)) };
+    return { width: maxWidth, height: maxHeight };
+  };
+  for (const el of controls) {
+    const rect = reachableSize(el);
     const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
     if (rect.width + 0.1 < minimum || rect.height + 0.1 < minimum)
       add('control-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `at least ${minimum}px in each dimension`, 'Increase the control hit area.');
@@ -434,13 +452,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const el of elements) {
     const rule = policy.iconSizeRules.find(rule => el.matches(rule.selector));
     if (!rule) continue;
-    let { left, right, top, bottom } = el.getBoundingClientRect();
-    for (const clip of contextFor(el).clips) {
-      if (clip.element === el) continue;
-      if (clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
-      if (clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
-    }
-    const rect = { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    const rect = reachableSize(el);
     if (!rule.sizes.some(size => Math.abs(rect.width - size) <= 0.1 && Math.abs(rect.height - size) <= 0.1))
       add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
   }
