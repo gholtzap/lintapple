@@ -1,0 +1,177 @@
+import type { Page, Frame, JSHandle } from 'playwright';
+import type { Policy, PageReport, InteractionPlan, InteractionReport, CheckOptions, UrlReport, AxeEngine, Visibility, Finding, SuppressedFinding } from './types.js';
+import policyDefaults from '../ui-policy.json' with { type: 'json' };
+export type * from './types.js';
+import { launchBrowser } from './browser.js';
+import axe from 'axe-core';
+import { audit } from './audit.js';
+import { auditAccessibility } from './accessibility.js';
+import { finding, summarizeFindings } from './report.js';
+export { summarizeFindings } from './report.js';
+import { runInteractions, validateInteractions } from './interactions.js';
+import { createVisibility } from './visibility.js';
+import { scanTooltips } from './tooltip-scan.js';
+import { svgTextContrast } from './svg-contrast.js';
+
+// Load the module export without assigning the app's global property.
+const engineSource = axe.source.replace('window.axe = axe;', '');
+if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
+
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
+
+export function validatePolicy(input: unknown = {}): Policy {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Policy must be an object.');
+  const policy = { ...structuredClone(defaultPolicy), ...input } as Policy;
+  for (const key of Object.keys(input)) if (!(key in defaultPolicy)) throw new Error(`Unknown policy field: ${key}`);
+  const strings = (value: unknown, name: string, nonempty = true) => {
+    if (!Array.isArray(value) || (nonempty && !value.length) || [...value].some((v: unknown) => typeof v !== 'string' || !v.trim())) throw new Error(`${name} must be a list of nonempty strings.`);
+  };
+  const positive = (value: number, name: string) => { if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number.`); };
+  strings(policy.fonts, 'fonts'); strings(policy.bannedCopy, 'bannedCopy', false);
+  if (!Array.isArray(policy.fontSizes) || !policy.fontSizes.length) throw new Error('fontSizes must be a nonempty list.');
+  for (const n of policy.fontSizes) positive(n, 'fontSizes');
+  if (!Array.isArray(policy.typeRules)) throw new Error('typeRules must be a list.');
+  for (const rule of policy.typeRules) {
+    if (!rule || Object.keys(rule).some(k => !['selector', 'sizes'].includes(k)) || typeof rule.selector !== 'string' || !rule.selector.trim() || !Array.isArray(rule.sizes) || !rule.sizes.length) throw new Error('Each type rule needs a selector and a nonempty size list.');
+    for (const n of rule.sizes) positive(n, 'typeRules sizes');
+  }
+  positive(policy.minControlSize, 'minControlSize'); positive(policy.minControlGap, 'minControlGap');
+  if (!Array.isArray(policy.controlSizeRules)) throw new Error('controlSizeRules must be a list.');
+  for (const rule of policy.controlSizeRules) {
+    if (!rule || Object.keys(rule).some(k => !['selector', 'minSize', 'minViewportWidth', 'maxViewportWidth'].includes(k)) || typeof rule.selector !== 'string' || !rule.selector.trim()) throw new Error('Each control size rule needs a selector and minSize.');
+    positive(rule.minSize, 'control size rule minSize');
+    for (const key of ['minViewportWidth', 'maxViewportWidth'] as const) {
+      if (rule[key] !== undefined && (!Number.isInteger(rule[key]) || rule[key] < 1 || rule[key] > 10000)) throw new Error('Control size rule viewport bounds must be integers from 1 to 10000.');
+    }
+    if ((rule.minViewportWidth ?? 1) > (rule.maxViewportWidth ?? 10000)) throw new Error('Control size rule viewport bounds must be in increasing order.');
+  }
+  if (!Array.isArray(policy.contentInsetRules)) throw new Error('contentInsetRules must be a list.');
+  for (const rule of policy.contentInsetRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'contentSelector', 'insets'].includes(key)) ||
+      typeof rule.selector !== 'string' || !rule.selector.trim() || typeof rule.contentSelector !== 'string' || !rule.contentSelector.trim() ||
+      !rule.insets || typeof rule.insets !== 'object' || Array.isArray(rule.insets) || !Object.keys(rule.insets).length)
+      throw new Error('Each content-inset rule needs selector, contentSelector, and a nonempty insets object.');
+    for (const [edge, value] of Object.entries<unknown>(rule.insets)) {
+      if (!['left', 'top', 'right', 'bottom'].includes(edge) || typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+        throw new Error('Content-inset edges must be left, top, right, or bottom with finite nonnegative pixel values.');
+    }
+  }
+  if (!Array.isArray(policy.iconSizeRules)) throw new Error('iconSizeRules must be a list.');
+  for (const rule of policy.iconSizeRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'sizes'].includes(key)) ||
+      typeof rule.selector !== 'string' || !rule.selector.trim() || !Array.isArray(rule.sizes) || !rule.sizes.length)
+      throw new Error('Each icon-size rule needs a selector and a nonempty size list.');
+    for (const size of rule.sizes) positive(size, 'icon-size sizes');
+  }
+  positive(policy.minLayoutGap, 'minLayoutGap');
+  positive(policy.minControlInset, 'minControlInset');
+  strings(policy.controlContainers, 'controlContainers');
+  if (!Array.isArray(policy.viewports) || !policy.viewports.length) throw new Error('viewports must be a nonempty list.');
+  for (const v of policy.viewports) if (!v || Object.keys(v).some(k => !['width', 'height'].includes(k)) || !Number.isInteger(v.width) || !Number.isInteger(v.height) || v.width < 1 || v.height < 1 || v.width > 10000 || v.height > 10000) throw new Error('Each viewport needs integer width and height from 1 to 10000.');
+  if (!Array.isArray(policy.colorSchemes) || !policy.colorSchemes.length || [...policy.colorSchemes].some(s => !['light', 'dark'].includes(s))) throw new Error('colorSchemes must contain light or dark.');
+  if (!Array.isArray(policy.exceptions)) throw new Error('exceptions must be a list.');
+  for (const e of policy.exceptions) {
+    if (!e || Object.keys(e).some(k => !['selector', 'rules', 'reason'].includes(k)) || typeof e.selector !== 'string' || !e.selector.trim() || typeof e.reason !== 'string' || !e.reason.trim()) throw new Error('Each exception needs a selector, rules, and a reason.');
+    strings(e.rules, 'exception rules');
+    for (const id of e.rules) if (!ruleIds.includes(id)) throw new Error(`Unknown rule: ${id}`);
+  }
+  return policy;
+}
+
+// Use this API after your test enters a dialog, error state, or signed-in page.
+export async function checkPage(page: Page | Frame, input: Partial<Policy> = {}): Promise<PageReport> {
+  const policy = validatePolicy(input);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  const svgContrast = await svgTextContrast(page);
+  const handles: JSHandle<unknown>[] = [];
+  try {
+    const contrast = await page.evaluateHandle<AxeEngine>(`(() => { const module = { exports: {} }; const define = undefined; ${engineSource}\n return module.exports; })()`);
+    handles.push(contrast);
+    const accessibility = await page.evaluateHandle<typeof auditAccessibility>(`(${auditAccessibility.toString()})`);
+    handles.push(accessibility);
+    const format = await page.evaluateHandle<typeof finding>(`(${finding.toString()})`);
+    handles.push(format);
+    const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+    handles.push(visibility);
+    const result = await page.evaluate(audit, { policy, contrast, accessibility, format, visibility, svgContrast });
+    const frame = 'mainFrame' in page ? page.mainFrame() : page;
+    const descendants = (parent: Frame): Frame[] => parent.childFrames().flatMap(child => [child, ...descendants(child)]);
+    const path = (frame: Frame): string => {
+      const parent = frame.parentFrame();
+      return parent ? `${path(parent)}/${parent.childFrames().indexOf(frame)}` : 'main';
+    };
+    const describe = (frame: Frame) => ({ url: frame.url(), name: frame.name(), path: path(frame) });
+    return { ...result, findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
+  }
+  finally { await Promise.all(handles.map(handle => handle.dispose())); }
+}
+
+export async function checkInteractions(page: Page, plan: Partial<InteractionPlan>, input: Partial<Policy> = {}, { timeout = 15000 } = {}): Promise<InteractionReport> {
+  if (!Number.isInteger(timeout) || timeout < 1) throw new Error('Page-check timeout must be a positive integer.');
+  const validated = validateInteractions(plan);
+  const policy = validatePolicy(input);
+  return runInteractions(page, validated, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility);
+}
+
+async function checkPageWithin(page: Page | Frame, policy: Policy, timeout: number): Promise<PageReport> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([checkPage(page, policy), new Promise<never>((_, reject: (reason?: unknown) => void) => {
+      timer = setTimeout(() => reject(new Error('Page checks exceeded the time limit.')), timeout);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready, timeout = 15000, interactions }: CheckOptions = {}): Promise<UrlReport> {
+  const parsed = new URL(url);
+  if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) throw new Error('Use an HTTP, HTTPS, or file URL.');
+  const policy = validatePolicy(input);
+  if (interactions !== undefined) validateInteractions(interactions);
+  const browser = await launchBrowser();
+  const report: UrlReport = { url, rules: ruleIds, runs: [], findings: [], summary: summarizeFindings([]) };
+  try {
+    for (const viewport of policy.viewports) for (const colorScheme of policy.colorSchemes) {
+      const context = await browser.newContext({ viewport, colorScheme, reducedMotion: 'reduce', locale: 'en-US', timezoneId: 'UTC', deviceScaleFactor: 1 });
+      try {
+        const page = await context.newPage();
+        page.setDefaultTimeout(timeout);
+        const response = await page.goto(url, { waitUntil: 'load', timeout });
+        if (response && !response.ok()) {
+          if (response.status() === 404) throw new Error(`Page not found: ${response.url()} (HTTP 404). Check the page path.`);
+          throw new Error(`Page returned HTTP ${response.status()} at ${response.url()}.`);
+        }
+        if (ready) await page.locator(ready).waitFor({ state: 'visible' });
+        const result = await checkPageWithin(page, policy, timeout);
+        const states = [{ name: 'initial', url: page.url(), ...result }];
+        const findings: Finding[] = result.findings.map(f => ({ ...f, state: 'initial' }));
+        const suppressed: SuppressedFinding[] = result.suppressed.map(f => ({ ...f, state: 'initial' }));
+        const accessibilityCoverage = { ...result.accessibilityCoverage };
+        if (interactions !== undefined) {
+          const interaction = await checkInteractions(page, interactions, policy, { timeout });
+          findings.push(...interaction.findings);
+          suppressed.push(...interaction.suppressed);
+          states.push(...interaction.states);
+          accessibilityCoverage.interactions = interaction.checks;
+          accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : interaction.states.length ? 'not tested: page-state actions only' : 'not tested: empty interaction plan';
+        }
+        const automatic = await scanTooltips(page, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility, interactions);
+        findings.push(...automatic.findings);
+        suppressed.push(...automatic.suppressed);
+        states.push(...automatic.states);
+        accessibilityCoverage.tooltips = automatic.coverage;
+        if (automatic.checks.length) {
+          accessibilityCoverage.interactions = [...(accessibilityCoverage.interactions ?? []), ...automatic.checks];
+          accessibilityCoverage.interactionRules = 'only listed interactions and declared tooltip states tested';
+        }
+        report.runs.push({ viewport, colorScheme, frameCoverage: result.frameCoverage, elements: result.elements, controls: result.controls, insetControls: result.insetControls, controlContentCoverage: result.controlContentCoverage, numericElements: result.numericElements, alignmentGroups: result.alignmentGroups, radiusContracts: result.radiusContracts, suppressed, accessibilityCoverage, states });
+        report.findings.push(...findings.map(f => ({ ...f, viewport: f.viewport ?? viewport, colorScheme })));
+      } finally { await context.close(); }
+    }
+    report.summary = summarizeFindings(report.findings);
+    return report;
+  } finally { await browser.close(); }
+}

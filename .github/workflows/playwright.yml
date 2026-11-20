@@ -2,24 +2,39 @@ name: Playwright UI checks
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: Site URL for hosted browser checks
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
   ui:
     runs-on: ubuntu-latest
+    env:
+      LINTAPPLE_ORIGIN: ${{ github.event.inputs.origin }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.0.0', '22', '24', '26']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm test -- --test-concurrency=2
+      - run: npm run typecheck
+      - run: npm test
       - run: npm run test:playwright
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: playwright-report
-          path: test-results/playwright-report/
+          name: playwright-report-node-${{ matrix.node }}
+          path: |
+            test-results/
+            dist/test-results/
           retention-days: 14

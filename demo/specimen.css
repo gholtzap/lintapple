@@ -65,3 +65,13 @@ button:hover { border-color: var(--ui-text); }
 ::view-transition-group(root), ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 160ms; }
 .product input { min-width: 0; width: 100%; min-height: 32px; padding: 4px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--ui-surface); color: var(--ui-text); font: 14px system-ui; }
 .product input::placeholder { color: var(--ui-text); opacity: 1; }
+.file-filter > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding-block: 8px; border: 1px solid var(--ui-border); border-radius: 8px; cursor: pointer; font-size: 14px; list-style: none; }
+.specimen:has(.file-filter) { min-height: calc(100dvh - 32px); }
+.file-filter > summary::-webkit-details-marker { display: none; }
+.file-filter img { flex-shrink: 0; }
+[data-theme="dark"] .file-filter img { filter: invert(1); }
+.filter-options { padding-top: 8px; }
+.filter-options button { width: 100%; padding: 8px; font-size: 14px; text-align: left; }
+.tooltip-example { position: fixed; top: 16px; left: 16px; width: min(224px, calc(100% - 32px)); align-items: flex-start; }
+.download-button { display: inline-block; min-height: 40px; padding: 8px 16px; border: 1px solid var(--ui-border); border-radius: 8px; background: var(--ui-surface); color: inherit; font-size: 14px; text-decoration: none; }
+.download-button:focus-visible, .file-filter > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }

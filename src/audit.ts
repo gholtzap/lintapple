@@ -1,0 +1,569 @@
+import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, RuleId, ContrastData } from './types.js';
+type Bounds = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>;
+interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
+// Runs in the browser. Use one report shape for all design rules.
+export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
+  for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.iconSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
+  for (const container of policy.controlContainers) document.querySelector(container);
+  for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
+  const findings: Finding[] = [];
+  const selector = (element: Element) => {
+    const parts: string[] = [];
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      const tag = node.tagName.toLowerCase();
+      if (node === document.documentElement) { parts.unshift(tag); break; }
+      const siblings = [...node.parentElement!.children].filter(s => s.tagName === node.tagName);
+      parts.unshift(`${tag}:nth-of-type(${siblings.indexOf(node) + 1})`);
+    }
+    return parts.join(' > ');
+  };
+  const add: AddFinding = (rule, element, actual, expected, fix, related, details = {}) => {
+    const pseudo = details.selector?.match(/::[\w-]+$/)?.[0];
+    const exception = policy.exceptions.find(e => e.rules.includes(rule) && (element.matches(e.selector) || !!pseudo && e.selector.endsWith(pseudo) && element.matches(e.selector.slice(0, -pseudo.length))));
+    if (exception) { suppressed.push({ rule, selector: selector(element), reason: exception.reason }); return; }
+    findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
+  };
+  const suppressed: SuppressedFinding[] = [];
+  const { textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
+  const elements = [...document.querySelectorAll('body, body *')].filter(visible);
+  if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
+  if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
+  const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
+  let controls: Element[];
+  let dropdownControls: Element[];
+  contrast.setup(document);
+  try {
+    controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
+    dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
+  } finally { contrast.teardown(); }
+  const isText = (el: Element) => textRects(el).length > 0 || el.matches('textarea, select') ||
+    el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type);
+  const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
+    const size = parseFloat(style.fontSize);
+    const tooltip = el.closest('[role="tooltip"]');
+    const sizes = policy.typeRules.find(rule => {
+      const role = el.closest(rule.selector);
+      return role && (!tooltip || tooltip.contains(role));
+    })?.sizes ?? policy.fontSizes;
+    if (!sizes.some(allowed => Math.abs(size - allowed) < 0.1))
+      add('font-size', el, `${size}px`, `one of ${sizes.join(', ')}px`, 'Use a configured size for this text role.', undefined, { selector: `${selector(el)}${pseudo}` });
+  };
+  const checkFont = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
+    const first = style.fontFamily.match(/^(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^,]*))/)!;
+    const family = (first[1] ?? first[2] ?? first[3].trim()).replace(/\\([\da-f]{1,6})\s?|\\(.)/gi, (_: string, hex: string | undefined, escaped: string) => hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : escaped);
+    if (!policy.fonts.some(font => font.toLowerCase() === family.toLowerCase()))
+      add('font-family', el, family, `one of ${policy.fonts.join(', ')}`, 'Use the approved interface font.', undefined, { selector: `${selector(el)}${pseudo}` });
+    checkFontSize(el, style, pseudo);
+  };
+  const placeholderStyle = (el: Element) => {
+    if (!el.matches('input:placeholder-shown, textarea:placeholder-shown') || !el.getAttribute('placeholder')?.trim()) return null;
+    const style = getComputedStyle(el, '::placeholder');
+    return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? style : null;
+  };
+  const hasTabularNumbers = (style: CSSStyleDeclaration) => {
+    const feature = style.fontFeatureSettings.match(/['"]tnum['"](?:\s+(\d+|on|off))?(?=\s*,|$)/)?.[1];
+    return /['"]tnum['"]/.test(style.fontFeatureSettings) ? feature !== 'off' && feature !== '0' : style.fontVariantNumeric.split(/\s+/).includes('tabular-nums');
+  };
+  let numericElements = 0;
+  for (const el of elements) {
+    const style = styles.get(el)!;
+    if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
+    if (!el.closest('pre, code, kbd, samp'))
+      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
+    const placeholder = placeholderStyle(el);
+    if (placeholder && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
+    // Numeric meaning is explicit for live values. Numeric table cells are inferred.
+    const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
+    if (el.matches('[data-ui-number]') || numericCell) {
+      numericElements++;
+      const numberStyles = [el, ...el.querySelectorAll('*')].filter(visible).flatMap(node => {
+        const own = textRects(node).length && [...node.childNodes].some(child => child.nodeType === Node.TEXT_NODE && /\d/.test(child.textContent ?? '')) ? [styles.get(node)!] : [];
+        return [...own, ...generatedTextStyles(node).filter(item => /\d/.test(item.text)).map(item => item.style)];
+      });
+      if (!numberStyles.length) numberStyles.push(style);
+      const proportional = numberStyles.find(textStyle => !hasTabularNumbers(textStyle));
+      if (proportional)
+        add('tabular-numbers', el, proportional.fontVariantNumeric, 'tabular digits', 'Set font-variant-numeric: tabular-nums. Use a font that supports tabular figures.');
+      if (numericCell && style.textAlign !== 'right' && style.textAlign !== (style.direction === 'rtl' ? 'start' : 'end'))
+        add('numeric-alignment', el, style.textAlign, 'right-aligned numeric table cells', 'Set text-align: right on the numeric column.');
+    }
+  }
+  const copyText = new Map<Element, string>();
+  const textOf = (el: Element): string => {
+    if (copyText.has(el)) return copyText.get(el)!;
+    if (el.matches('pre, code, kbd, samp')) return '\0';
+    if (!hasVisibleContent(el)) return '';
+    const generated = generatedTextStyles(el);
+    const generatedText = (pseudo: string) => {
+      const item = generated.find(item => item.pseudo === pseudo);
+      if (!item) return '';
+      return item.style.display.startsWith('inline') || item.style.display === 'contents' ? item.text : `\n${item.text}\n`;
+    };
+    const content = (placeholderStyle(el) ? el.getAttribute('placeholder')! : el instanceof HTMLTextAreaElement ? el.value : el.matches('input[type="button"], input[type="submit"], input[type="reset"]') ? (el as HTMLInputElement).value : [...el.childNodes].map(node => {
+      if (node.nodeType === Node.TEXT_NODE) return visible(el) ? node.textContent : '';
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+      if ((node as Element).tagName === 'BR') return '\n';
+      const content = textOf(node as Element);
+      const display = getComputedStyle(node as Element).display;
+      return display.startsWith('inline') || display === 'contents' ? content : `\n${content}\n`;
+    }).join(''));
+    const text = (generatedText('::before') + content + generatedText('::after')).replace(/\s+/g, ' ').toLowerCase();
+    copyText.set(el, text);
+    return text;
+  };
+  for (const el of elements.filter(el => !el.closest('pre, code, kbd, samp'))) {
+    for (const phrase of policy.bannedCopy) {
+      const normalized = phrase.replace(/\s+/g, ' ').toLowerCase();
+      if (textOf(el).includes(normalized) && ![...el.children].some(child => textOf(child).includes(normalized)))
+        add('copy', el, phrase, 'text without prohibited phrases', 'Remove the phrase or use specific text that helps the user.');
+    }
+  }
+  const groups = new Map<Element | null, Element[]>();
+  for (const el of controls) {
+    const parent = el.closest('[data-ui-actions]') ?? el.parentElement;
+    const list = groups.get(parent) ?? [];
+    list.push(el); groups.set(parent, list);
+  }
+  // Use the same geometry for control groups and component stacks.
+  const checkGap = (group: Element[], rule: RuleId, minimum: number) => {
+    for (let i = 0; i < group.length; i++) for (let j = i + 1; j < group.length; j++) {
+      const a = group[i].getBoundingClientRect(), b = group[j].getBoundingClientRect();
+      const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      const yOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      const gap = yOverlap > 0 ? Math.max(a.left - b.right, b.left - a.right) : xOverlap > 0 ? Math.max(a.top - b.bottom, b.top - a.bottom) : Infinity;
+      if (gap + 0.1 < minimum)
+        add(rule, group[i], `${Number(gap.toFixed(2))}px`, `a gap of at least ${minimum}px`, 'Use a layout group with an approved gap. Check for overlap.', group[j]);
+    }
+  };
+  for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
+  const layoutChildren = (el: Element): Element[] => [...el.children].flatMap(child =>
+    getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
+  for (const el of [...document.querySelectorAll('[data-ui-stack]')].filter(hasVisibleContent))
+    checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
+  let alignmentGroups = 0;
+  for (const group of [...document.querySelectorAll('[data-ui-align]')].filter(hasVisibleContent)) {
+    const alignment = group.getAttribute('data-ui-align');
+    const items = [...group.querySelectorAll('[data-ui-align-item]')].filter(el => el.closest('[data-ui-align]') === group);
+    if (!['start', 'center', 'end'].includes(alignment ?? '') || items.length < 2) {
+      add('layout-alignment', group, `${alignment || 'empty alignment'} with ${items.length} marked items`, 'start, center, or end alignment with at least two marked items', 'Set data-ui-align and mark the elements that must align with data-ui-align-item.');
+      continue;
+    }
+    const targets = items.filter(visible);
+    if (targets.length < 2) continue;
+    alignmentGroups++;
+    const rtl = getComputedStyle(group).direction === 'rtl';
+    const position = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return alignment === 'center' ? (rect.left + rect.right) / 2 : rect[(alignment === 'start') !== rtl ? 'left' : 'right'];
+    };
+    const reference = targets[0];
+    for (const target of targets.slice(1)) {
+      const distance = Math.abs(position(target) - position(reference));
+      if (distance > 1)
+        add('layout-alignment', target, `${Number(distance.toFixed(2))}px horizontal misalignment`, `horizontal ${alignment} alignment within 1px`, 'Align the marked elements. Use matching margins and container padding.', reference);
+    }
+  }
+  const edgeInsets = (outer: Bounds, inner: Bounds) => ({
+    left: inner.left - outer.left,
+    top: inner.top - outer.top,
+    right: outer.right - inner.right,
+    bottom: outer.bottom - inner.bottom,
+  });
+  const transformFor = (container: Element) => {
+    let transform = new DOMMatrix();
+    for (let node: Element | null = container; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      const matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
+      const [x, y = x] = style.scale === 'none' ? [1, 1] : style.scale.split(/\s+/).map(Number);
+      transform = matrix.scale(x, y).multiply(transform);
+    }
+    return transform;
+  };
+  const scaleFor = (container: Element) => {
+    const bounds = container.getBoundingClientRect();
+    const style = styles.get(container) ?? getComputedStyle(container);
+    const length = (axis: 'width' | 'height') => {
+      const edges: (keyof CSSStyleDeclaration)[] = axis === 'width' ? ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] : ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'];
+      return parseFloat(style[axis]) + (style.boxSizing === 'border-box' ? 0 : edges.reduce<number>((sum, key) => sum + parseFloat(String(style[key])), 0));
+    };
+    const width = length('width') || (container as HTMLElement).offsetWidth;
+    const height = length('height') || (container as HTMLElement).offsetHeight;
+    const transform = transformFor(container);
+    return { x: width ? bounds.width / width : Math.hypot(transform.a, transform.b), y: height ? bounds.height / height : Math.hypot(transform.c, transform.d) };
+  };
+  // One client-box primitive for control insets and text clipping.
+  const clientBounds = (container: Element, box: 'padding-box' | 'content-box' | 'border-box' = 'padding-box') => {
+    const bounds = container.getBoundingClientRect();
+    // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
+    const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
+    const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : container instanceof SVGSVGElement ? scaleFor(container).y : 1;
+    const style = getComputedStyle(container);
+    const inline = container instanceof HTMLElement && style.display === 'inline';
+    let clientLeft = inline ? parseFloat(style.borderLeftWidth) : container.clientLeft;
+    let clientTop = inline ? parseFloat(style.borderTopWidth) : container.clientTop;
+    let clientWidth = inline ? bounds.width / scaleX - clientLeft - parseFloat(style.borderRightWidth) : container.clientWidth;
+    let clientHeight = inline ? bounds.height / scaleY - clientTop - parseFloat(style.borderBottomWidth) : container.clientHeight;
+    if (box === 'border-box') {
+      clientLeft = clientTop = 0;
+      clientWidth = bounds.width / scaleX;
+      clientHeight = bounds.height / scaleY;
+    } else if (box === 'content-box') {
+      clientLeft += parseFloat(style.paddingLeft);
+      clientTop += parseFloat(style.paddingTop);
+      clientWidth -= parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      clientHeight -= parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    }
+    const transform = transformFor(container);
+    const left = transform.a < 0 ? bounds.right - (clientLeft + clientWidth) * scaleX : bounds.left + clientLeft * scaleX;
+    const top = transform.d < 0 ? bounds.bottom - (clientTop + clientHeight) * scaleY : bounds.top + clientTop * scaleY;
+    const result = { left, top, right: left + clientWidth * scaleX, bottom: top + clientHeight * scaleY };
+    if (!Object.values(result).every(Number.isFinite)) throw new Error('A clipping or control container must have a measurable HTML box.');
+    return result;
+  };
+  let insetControls = 0;
+  for (const el of controls) {
+    const container = el.parentElement!.closest(policy.controlContainers.join(', '));
+    if (!container || !visible(container)) continue;
+    insetControls++;
+    const innerBounds = clientBounds(container);
+    for (const [edge, distance] of Object.entries(edgeInsets(innerBounds, el.getBoundingClientRect()))) {
+      if (distance + 0.1 < policy.minControlInset)
+        add('control-inset', el, `${edge} inset ${Number(distance.toFixed(2))}px`, `at least ${policy.minControlInset}px from the container's inner ${edge} edge`, 'Add container padding or correct the button position. Check absolute offsets, transforms, and negative margins.', container);
+    }
+  }
+  const checkContentInsets = (container: Element, content: Element, rects: Bounds[], insets: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>>) => {
+    const bounds = clientBounds(container);
+    for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
+      const minimum = insets[edge];
+      const distance = Math.min(...rects.map(rect => edgeInsets(bounds, rect)[edge]));
+      if (minimum !== undefined && distance + 0.1 < minimum)
+        add('content-inset', content, `${edge} inset ${Number(distance.toFixed(2))}px`, `at least ${minimum}px from the container's inner ${edge} edge`, 'Add content padding or correct the content position. Borders do not count as padding.', container);
+    }
+  };
+  const controlContentCoverage: PageReport['controlContentCoverage'] = { checked: 0, unmeasured: [] };
+  const contentControls = new Set([...controls, ...dropdownControls]);
+  for (const container of elements) {
+    const rule = policy.contentInsetRules.find(rule => container.matches(rule.selector));
+    let customContent = 0;
+    if (rule) {
+      const content = [...container.querySelectorAll(rule.contentSelector)].filter(el => visible(el) && el.parentElement?.closest(rule.selector) === container);
+      customContent = content.length;
+      for (const el of content) checkContentInsets(container, el, [el.getBoundingClientRect()], rule.insets);
+    }
+    if (!contentControls.has(container)) continue;
+    const reasons = new Set<string>();
+    const box = container.getBoundingClientRect();
+    if (!box.width || !box.height) reasons.add('The control has no measurable box.');
+    else if (container.matches('select')) reasons.add('Native select label and arrow have no separate DOM boxes.');
+    else if (container.matches('input')) reasons.add('Native input content has no separate DOM box.');
+    else if (!rule) {
+      let measured = false;
+      for (const el of [container, ...container.querySelectorAll('*')]) {
+        if (!visible(el)) continue;
+        // Nested controls and popup content do not belong to this control's label.
+        const popup = el.closest('[role="listbox"], [role="menu"], [role="dialog"]');
+        if (el !== container && (contentControls.has(el) || (popup && container.contains(popup)))) continue;
+        let owner = el.parentElement;
+        while (owner && owner !== container && !contentControls.has(owner)) owner = owner.parentElement;
+        if (el !== container && owner !== container) continue;
+        if (el.closest('svg') && !el.matches('svg')) continue;
+        const style = getComputedStyle(el);
+        let clipped = false;
+        for (let node: Element | null = el; node; node = node.parentElement) {
+          const item = getComputedStyle(node);
+          if (item.clip !== 'auto' || item.clipPath !== 'none') { clipped = true; break; }
+          if (node === container) break;
+        }
+        if (clipped) { reasons.add('Clipped control content needs visual review.'); continue; }
+        const rects = el.matches('svg, img, canvas') ? [el.getBoundingClientRect()] : textRects(el);
+        if (rects.length) {
+          checkContentInsets(container, el, rects, { left: 8, right: 8 });
+          measured = true;
+        }
+        if (style.backgroundImage !== 'none' || ['::before', '::after'].some(pseudo => {
+          const item = getComputedStyle(el, pseudo);
+          return item.content !== 'none' && item.content !== 'normal' && item.display !== 'none' && item.visibility === 'visible' && parseFloat(item.opacity) > 0;
+        })) reasons.add('CSS images and generated content have no separate DOM boxes.');
+      }
+      if (measured) controlContentCoverage.checked++;
+      else reasons.add('No measurable control text or icon.');
+    } else if (customContent) controlContentCoverage.checked++;
+    else reasons.add('The content-inset rule has no matching content.');
+    for (const reason of reasons) controlContentCoverage.unmeasured.push({ selector: selector(container), reason });
+  }
+  for (const outer of elements.filter(el => el.matches('[data-ui-radius]'))) {
+    const inner = [...outer.children].find(el => el.matches('[data-ui-radius-inner]') && visible(el));
+    if (!inner) { add('nested-radius', outer, 'no visible direct inner element', 'a direct child with data-ui-radius-inner', 'Mark the inner surface or remove the radius contract.'); continue; }
+    const a = outer.getBoundingClientRect(), b = inner.getBoundingClientRect();
+    const insets = Object.values(edgeInsets(a, b));
+    const corners: (keyof CSSStyleDeclaration)[] = ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'];
+    const outerValues = corners.map(key => String(styles.get(outer)![key]));
+    const innerValues = corners.map(key => String(getComputedStyle(inner)[key]));
+    const outerScale = scaleFor(outer), innerScale = scaleFor(inner);
+    const round = [outer, inner].every(el => ['top-left', 'top-right', 'bottom-right', 'bottom-left'].every(corner => {
+      const shape = getComputedStyle(el).getPropertyValue(`corner-${corner}-shape`);
+      return !shape || shape === 'round' || shape === 'superellipse(1)';
+    }));
+    if (!round || [outerScale, innerScale].some(scale => !Number.isFinite(scale.x) || !Number.isFinite(scale.y) || Math.abs(scale.x - scale.y) > 0.01) || insets.some(n => n < 0 || Math.abs(n - insets[0]) > 1) || [...outerValues, ...innerValues].some(n => !/^\d+(?:\.\d+)?px$/.test(n)) || new Set(outerValues).size !== 1 || new Set(innerValues).size !== 1) {
+      add('nested-radius', outer, 'unequal insets or unsupported corner shapes', 'equal insets and circular pixel radii', 'Use this contract only for concentric, equally inset surfaces. Use a reasoned exception for other shapes.');
+      continue;
+    }
+    const outerRadius = Math.min(parseFloat(outerValues[0]) * outerScale.x, a.width / 2, a.height / 2);
+    const innerRadius = Math.min(parseFloat(innerValues[0]) * innerScale.x, b.width / 2, b.height / 2);
+    const expected = Math.max(0, outerRadius - insets[0]);
+    if (Math.abs(innerRadius - expected) > 1)
+      add('nested-radius', inner, innerValues[0], `${Number((expected / innerScale.x).toFixed(2))}px inner radius`, 'Set the inner radius to max(0px, outer radius minus the inset). The inset includes the border.');
+  }
+  const styleOf = (el: Element) => styles.get(el) ?? getComputedStyle(el);
+  const scrolls = (node: Element, axis: 'X' | 'Y') => node.clientWidth > 0 && node.clientHeight > 0 && !['inline', 'contents'].includes(styleOf(node).display) && /^(auto|scroll)$/.test(styleOf(node)[`overflow${axis}`]);
+  const scrollsWithin = (ancestors: Element[], clip: Pick<Clip, 'element' | 'bounds'>, axis: 'X' | 'Y') => {
+    for (const node of ancestors) {
+      if (node === clip.element || !clip.element.contains(node)) break;
+      if (!scrolls(node, axis)) continue;
+      const bounds = node.getBoundingClientRect();
+      const edges: (keyof Bounds)[] = axis === 'X' ? ['left', 'right'] : ['top', 'bottom'];
+      if (bounds[edges[0]] >= clip.bounds[edges[0]] - 1 && bounds[edges[1]] <= clip.bounds[edges[1]] + 1) return true;
+    }
+    return false;
+  };
+  const viewport = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: document.documentElement.clientHeight };
+  const contextFor = (el: Element) => {
+    const ancestors: Element[] = [];
+    let containingBlock: Element | null = null;
+    let overlay = false;
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      overlay ||= styleOf(node).position === 'fixed' || node.matches('dialog[open], [role="dialog"], [role="alertdialog"], [role="tooltip"], [data-ui-overlay]');
+      // Overflow below an absolute box's containing block cannot clip that box.
+      if (containingBlock && node !== containingBlock) continue;
+      ancestors.push(node);
+      const position: string = styleOf(node).position;
+      const offsetParent: Element | null = (node as HTMLElement).offsetParent;
+      // Only a viewport-fixed box escapes all ancestor clips.
+      if (position === 'fixed' && !offsetParent) break;
+      containingBlock = ['absolute', 'fixed'].includes(position) ? offsetParent ?? document.documentElement : null;
+    }
+    const clips = ancestors.filter(node => node instanceof SVGSVGElement || node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => {
+      const style = styleOf(node);
+      const paint = /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
+      const overflowX = paint && style.overflowX === 'visible' ? 'clip' : style.overflowX;
+      const overflowY = paint && style.overflowY === 'visible' ? 'clip' : style.overflowY;
+      return { element: node, overflowX, overflowY, x: /^(hidden|clip)$/.test(overflowX) || /^(auto|scroll)$/.test(overflowX) && !scrolls(node, 'X'), y: /^(hidden|clip)$/.test(overflowY) || /^(auto|scroll)$/.test(overflowY) && !scrolls(node, 'Y') };
+    }).filter(clip => clip.x || clip.y).map(clip => {
+      const style = styleOf(clip.element);
+      const value = style.overflowClipMargin;
+      const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
+      const margin = parseFloat(value.match(/[\d.]+px/)?.[0] ?? '0');
+      const base = clientBounds(clip.element);
+      const expanded = clientBounds(clip.element, reference);
+      const scale = scaleFor(clip.element);
+      const x = clip.overflowX === 'clip', y = clip.overflowY === 'clip';
+      return { ...clip, bounds: {
+        left: x ? expanded.left - margin * scale.x : base.left,
+        right: x ? expanded.right + margin * scale.x : base.right,
+        top: y ? expanded.top - margin * scale.y : base.top,
+        bottom: y ? expanded.bottom + margin * scale.y : base.bottom,
+      } };
+    });
+    return {
+      ancestors,
+      clips,
+      overlay,
+      boxScrollX: ancestors.slice(1).some(node => scrolls(node, 'X') && node !== document.body && node !== document.documentElement),
+      boxScrollY: ancestors.slice(1).some(node => scrolls(node, 'Y') && node !== document.body && node !== document.documentElement),
+      textScrollX: ancestors.some(node => scrolls(node, 'X') && node !== document.body && node !== document.documentElement),
+      textScrollY: ancestors.some(node => scrolls(node, 'Y') && node !== document.body && node !== document.documentElement),
+    };
+  };
+  for (const el of controls) {
+    let { left, right, top, bottom } = el.getBoundingClientRect();
+    for (const clip of contextFor(el).clips) {
+      if (clip.element === el) continue;
+      if (clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
+      if (clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
+    }
+    const rect = { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
+    if (rect.width + 0.1 < minimum || rect.height + 0.1 < minimum)
+      add('control-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `at least ${minimum}px in each dimension`, 'Increase the control hit area.');
+  }
+  for (const el of elements) {
+    const rule = policy.iconSizeRules.find(rule => el.matches(rule.selector));
+    if (!rule) continue;
+    let { left, right, top, bottom } = el.getBoundingClientRect();
+    for (const clip of contextFor(el).clips) {
+      if (clip.element === el) continue;
+      if (clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
+      if (clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
+    }
+    const rect = { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    if (!rule.sizes.some(size => Math.abs(rect.width - size) <= 0.1 && Math.abs(rect.height - size) <= 0.1))
+      add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
+  }
+  const outside = (bounds: Bounds, rect: Bounds, x: boolean, y: boolean) => Object.entries(edgeInsets(bounds, rect)).filter(([edge, distance]) => distance < -1 && ((edge === 'left' || edge === 'right') ? x : y));
+  const clippedRect = (rect: Bounds, clips: Clip[], el: Element, includeSelf: boolean) => {
+    const result = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+    for (const clip of clips) {
+      if ((!includeSelf && clip.element === el) || clip.element === document.body || clip.element === document.documentElement) continue;
+      if (clip.x) { result.left = Math.max(result.left, clip.bounds.left); result.right = Math.min(result.right, clip.bounds.right); }
+      if (clip.y) { result.top = Math.max(result.top, clip.bounds.top); result.bottom = Math.min(result.bottom, clip.bounds.bottom); }
+    }
+    return result;
+  };
+  for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
+    const context = contextFor(el);
+    const generated = generatedTextRects(el);
+    if (generated === null && context.clips.length)
+      add('content-clipping', el, 'generated text geometry could not be measured', 'text lines inside the clipping area', 'Review the generated text and its clipping area.', undefined, { status: 'unresolved' });
+    const rects = [...textRects(el), ...(generated ?? [])];
+    const escaped = new Map<string, number>();
+    for (const [rect, scrollX, scrollY, isTextRect] of ([[el.getBoundingClientRect(), context.boxScrollX, context.boxScrollY, false], ...rects.map(rect => [rect, context.textScrollX, context.textScrollY, true])] as [DOMRect, boolean, boolean, boolean][])) {
+      const painted = clippedRect(rect, context.clips, el, isTextRect);
+      if (painted.left >= painted.right || painted.top >= painted.bottom) continue;
+      for (const [edge, distance] of outside(viewport, painted, !scrollX, context.overlay && !scrollY))
+        escaped.set(edge, Math.max(escaped.get(edge) ?? 0, -distance));
+    }
+    if (escaped.size)
+      add('viewport-bounds', el, [...escaped].map(([edge, amount]) => `${edge} overflow ${Number(amount.toFixed(2))}px`).join(', '), 'content inside the horizontal viewport; fixed elements and open overlays also fit vertically', 'Use responsive widths and wrapping. Constrain the overlay size and use a local scroll region for long content.');
+    const container = el.closest('[data-ui-content]');
+    if (container && rects.length) {
+      const contract = { element: container, bounds: clientBounds(container) };
+      const overflow = new Map<string, number>();
+      const checkX = !(context.ancestors.includes(container) && scrolls(container, 'X')) && !scrollsWithin(context.ancestors, contract, 'X');
+      const checkY = !(context.ancestors.includes(container) && scrolls(container, 'Y')) && !scrollsWithin(context.ancestors, contract, 'Y');
+      for (const rect of rects) {
+        const painted = clippedRect(rect, context.clips, el, true);
+        if (painted.left >= painted.right || painted.top >= painted.bottom) continue;
+        for (const [edge, distance] of outside(contract.bounds, painted, checkX, checkY))
+          overflow.set(edge, Math.max(overflow.get(edge) ?? 0, -distance));
+      }
+      if (overflow.size)
+        add('content-overflow', el, [...overflow].map(([edge, amount]) => `${edge} text overflow ${Number(amount.toFixed(2))}px`).join(', '), 'text inside the nearest data-ui-content container', 'Let text wrap or provide a local scroll region inside the marked container.', container);
+    }
+    for (const clip of context.clips) {
+      const cut = new Map<string, number>();
+      for (const rect of rects) for (const [edge, distance] of outside(clip.bounds, rect, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y')))
+        cut.set(edge, Math.max(cut.get(edge) ?? 0, -distance));
+      if (cut.size)
+        add('content-clipping', el, [...cut].map(([edge, amount]) => `${edge} text clipping ${Number(amount.toFixed(2))}px`).join(', '), 'text lines inside the clipping area', 'Allow text to wrap, increase the container size, or provide a local scroll region. Use a reasoned exception for intentional truncation.', clip.element);
+    }
+  }
+  const root = document.documentElement;
+  const background = getComputedStyle(root).backgroundColor;
+  if (background === 'transparent' || /(?:,\s*0\s*\)|\/\s*0(?:%|\s*\)))/.test(background))
+    add('root-background', root, background, 'an explicit root background color', 'Set the page background on html. Use the active theme color.');
+  const overflow = Math.max(root.scrollWidth, document.body?.scrollWidth ?? 0) - root.clientWidth;
+  if (overflow > 1) add('horizontal-overflow', root, `${overflow}px of overflow`, 'no page-level horizontal overflow', 'Fix the element that is wider than the page. Use a local scroll region for wide content.');
+  for (const font of document.fonts) {
+    if (font.status === 'error') add('font-loading', root, `failed font ${font.family}`, 'all requested font files to load', 'Fix the font URL or font file.');
+  }
+  // A single character can be meaningful text, such as a counter or initial.
+  contrast.configure({ checks: [{ id: 'color-contrast', options: {
+    ignoreUnicode: true, ignoreLength: true, ignorePseudo: false,
+    boldValue: 700, boldTextPt: 14, largeTextPt: 18,
+    contrastRatio: { normal: { expected: 4.5 }, large: { expected: 3 } },
+    pseudoSizeThreshold: 0.25, shadowOutlineEmMax: 0.2, textStrokeEmMin: 0.03,
+  } }] });
+  const contrastResult = await contrast.run(document, {
+    runOnly: ['color-contrast'], iframes: false, elementRef: true,
+    resultTypes: ['violations', 'incomplete'],
+  });
+  const inScope = new Set(elements);
+  const reportContrast = (el: Element, status: 'failed' | 'unresolved', data: ContrastData, reason?: string) => {
+    const required = parseFloat(data.expectedContrastRatio ?? '');
+    const actual = status === 'failed' ? `${data.contrastRatio}:1 text contrast (foreground ${data.fgColor}, background ${data.bgColor})` : `contrast could not be measured: ${reason ?? 'background or text needs review'}`;
+    add('text-contrast', el, actual, Number.isFinite(required) ? `text contrast of at least ${required}:1` : 'a measurable WCAG AA text contrast ratio',
+      status === 'failed' ? 'Increase the contrast between the text and its background. Check text color, opacity, and background layers.' : 'Use a measurable background or review the text and background. Record a scoped exception with a reason after review.',
+      null, { status, ...(Number.isFinite(required) ? { requiredContrastRatio: required } : {}), ...(status === 'failed' ? { contrastRatio: data.contrastRatio, foreground: data.fgColor, background: data.bgColor } : {}) });
+  };
+  for (const [status, results] of [['failed', contrastResult.violations], ['unresolved', contrastResult.incomplete]] as const) {
+    for (const result of results) for (const node of result.nodes) {
+      const el = node.element;
+      if (!inScope.has(el) || !visible(el) || el.closest('button:disabled, [aria-disabled="true"]')) continue;
+      if (el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) continue;
+      if (svgContrast.some(result => document.querySelector(result.selector) === el)) continue;
+      const check = [...node.any, ...node.all, ...node.none].find(check => check.id === 'color-contrast');
+      const data = check?.data ?? {};
+      reportContrast(el, status, data, check?.message ?? node.failureSummary);
+    }
+  }
+  for (const result of svgContrast) {
+    if (result.status === 'passed') continue;
+    const el = document.querySelector(result.selector);
+    if (!el || !inScope.has(el)) continue;
+    reportContrast(el, result.status, { expectedContrastRatio: `${result.required}:1`, contrastRatio: result.contrastRatio, fgColor: result.fgColor, bgColor: result.bgColor }, result.reason);
+  }
+  // axe checks input text color, not the separately styled placeholder.
+  // Use its color and background primitives without changing form values.
+  contrast.setup(document);
+  try {
+    for (const el of elements.filter(el => textRects(el).length && (!el.getBoundingClientRect().width || !el.getBoundingClientRect().height) && !el.closest(':disabled, [aria-disabled="true"]'))) {
+      const style = styles.get(el)!;
+      const required = parseFloat(style.fontSize) >= 24 || (parseFloat(style.fontWeight) >= 700 && parseFloat(style.fontSize) >= 56 / 3) ? 3 : 4.5;
+      const data = { expectedContrastRatio: `${required}:1` };
+      const rects = textRects(el);
+      let box = el.parentElement, unsupported = false;
+      while (box && rects.some(rect => outside(box!.getBoundingClientRect(), rect, true, true).length)) box = box.parentElement;
+      for (let node: Element | null = el; node; node = node.parentElement) {
+        const nodeStyle = styleOf(node);
+        if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal' || nodeStyle.textShadow !== 'none' || parseFloat(nodeStyle.webkitTextStrokeWidth) > 0) unsupported = true;
+        if (box && node !== box && box.contains(node) && nodeStyle.display !== 'contents') {
+          const bounds = node.getBoundingClientRect();
+          if (rects.some(rect => bounds.left < rect.right && bounds.right > rect.left && bounds.top < rect.bottom && bounds.bottom > rect.top)) {
+            try { if (nodeStyle.backgroundImage !== 'none' || new contrast.commons.color.Color().parseString(nodeStyle.backgroundColor).alpha > 0) unsupported = true; }
+            catch { unsupported = true; }
+          }
+        }
+        for (const pseudo of ['::before', '::after']) {
+          if (!['none', 'normal'].includes(getComputedStyle(node, pseudo).content)) unsupported = true;
+        }
+      }
+      // The ancestor background is valid only when no other painted box overlaps the text.
+      if (elements.some(node => node !== el && !node.contains(el) && rects.some(rect => {
+        const bounds = node.getBoundingClientRect();
+        return bounds.width > 0 && bounds.height > 0 && bounds.left < rect.right && bounds.right > rect.left && bounds.top < rect.bottom && bounds.bottom > rect.top;
+      }))) unsupported = true;
+      if (!box || unsupported) { reportContrast(el, 'unresolved', data, 'boxless text effects or background layers need review'); continue; }
+      try {
+        let background = contrast.commons.color.getBackgroundColor(box);
+        if (!background && box === root && styleOf(root).backgroundImage === 'none') {
+          background = new contrast.commons.color.Color().parseString(styleOf(root).backgroundColor);
+          if (background.alpha !== 1) background = null;
+        }
+        if (!background) { reportContrast(el, 'unresolved', data, 'boxless text background needs review'); continue; }
+        const foreground = new contrast.commons.color.Color().parseString(style.webkitTextFillColor || style.color);
+        const blended = contrast.commons.color.flattenColors(foreground, background);
+        const ratio = contrast.commons.color.getContrast(background, blended);
+        if (!Number.isFinite(ratio)) { reportContrast(el, 'unresolved', data, 'boxless text color could not be parsed'); continue; }
+        if (ratio < required) reportContrast(el, 'failed', { ...data, contrastRatio: Math.floor(ratio * 100) / 100, fgColor: blended.toHexString(), bgColor: background.toHexString() });
+      } catch (error) { reportContrast(el, 'unresolved', data, `boxless text calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    for (const el of elements.filter(el => el.matches('input:placeholder-shown, textarea:placeholder-shown') && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'))) {
+      const style = placeholderStyle(el);
+      if (!style) continue;
+      const size = parseFloat(style.fontSize), bold = parseFloat(style.fontWeight) >= 700;
+      const required = size >= 24 || (bold && size >= 56 / 3) ? 3 : 4.5;
+      const data = { expectedContrastRatio: `${required}:1` };
+      let unsupported = false;
+      for (let node: Element | null = el; node; node = node.parentElement) {
+        const nodeStyle = getComputedStyle(node);
+        if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
+      }
+      if (unsupported || parseFloat(style.webkitTextStrokeWidth) > 0 || style.textShadow !== 'none' || style.filter !== 'none' || style.mixBlendMode !== 'normal') {
+        reportContrast(el, 'unresolved', data, 'placeholder opacity, strokes, filters, blend modes, or text shadows need review');
+        continue;
+      }
+      try {
+        const background = contrast.commons.color.getBackgroundColor(el);
+        if (!background) { reportContrast(el, 'unresolved', data, 'placeholder background needs review'); continue; }
+        const foreground = new contrast.commons.color.Color().parseString(style.webkitTextFillColor || style.color);
+        foreground.alpha *= parseFloat(style.opacity);
+        const blended = contrast.commons.color.flattenColors(foreground, background);
+        const ratio = contrast.commons.color.getContrast(background, blended);
+        if (!Number.isFinite(ratio)) { reportContrast(el, 'unresolved', data, 'placeholder color could not be parsed'); continue; }
+        if (ratio < required) reportContrast(el, 'failed', { ...data, contrastRatio: Math.floor(ratio * 100) / 100, fgColor: blended.toHexString(), bgColor: background.toHexString() });
+      } catch (error) { reportContrast(el, 'unresolved', data, `placeholder calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+  } finally { contrast.teardown(); }
+  const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
+  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+}
