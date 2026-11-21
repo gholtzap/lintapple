@@ -1,6 +1,8 @@
 name: Playwright UI checks
 on:
   push:
+    branches: [main]
+    tags: ['**']
   pull_request:
   workflow_dispatch:
     inputs:
