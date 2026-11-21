@@ -27,17 +27,19 @@
     "README.md"
   ],
   "scripts": {
-    "test": "npm run build && node --test --test-concurrency=2 dist/test/*.test.js",
+    "test": "npm run build && npm run test:built",
     "check": "npm run build && node dist/bin/lintapple.js",
     "demo": "npm run build && node dist/demo/server.js",
     "demo:check": "npm run build && node --test dist/test/demo.test.js",
     "demo:record": "npm run build && node dist/scripts/record-demo.js",
     "release:build": "npm run build && node dist/scripts/build-release.js",
-    "test:playwright": "npm run build && playwright test --config dist/examples/playwright/playwright.config.js",
+    "test:playwright": "npm run build && npm run test:playwright:built",
     "demo:highlight": "npm run build && node dist/scripts/highlight-demo.js",
     "build": "tsc && node dist/scripts/build-assets.js",
-    "typecheck": "tsc --noEmit",
-    "prepack": "npm run build"
+    "typecheck": "bun check --no-script",
+    "prepack": "npm run build",
+    "test:built": "node dist/scripts/ci-tests.js",
+    "test:playwright:built": "playwright test --config dist/examples/playwright/playwright.config.js"
   },
   "engines": {
     "node": ">=22"
@@ -51,5 +53,6 @@
     "shiki": "4.5.0",
     "typescript": "^5.9.3"
   },
-  "types": "./dist/src/index.d.ts"
+  "types": "./dist/src/index.d.ts",
+  "packageManager": "bun@1.4.5"
 }
