@@ -33,9 +33,16 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     image.src = (el as HTMLInputElement).src;
     try { await image.decode(); loadedImages.add(el); } catch { /* A failed image can paint its alternate text. */ }
   }));
-  const isText = (el: Element) => textRects(el).length > 0 || el.matches('textarea, select') ||
-    el instanceof HTMLOptionElement && el.text.trim().length > 0 && !!el.closest('select')?.matches('select[multiple], select[size]:not([size="0"]):not([size="1"])') ||
-    el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type) && !loadedImages.has(el);
+  const isText = (el: Element) => {
+    let groupLabel = false;
+    if (el instanceof HTMLOptGroupElement && el.label.trim()) {
+      const select = el.closest('select');
+      groupLabel = !!select && !(getComputedStyle(select).appearance === 'base-select' && el.querySelector(':scope > legend'));
+    }
+    return textRects(el).length > 0 || el.matches('textarea, select') || groupLabel ||
+      el instanceof HTMLOptionElement && el.text.trim().length > 0 && !!el.closest('select')?.matches('select[multiple], select[size]:not([size="0"]):not([size="1"])') ||
+      el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type) && !loadedImages.has(el);
+  };
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
     const tooltip = el.closest('[role="tooltip"]');
