@@ -13,11 +13,13 @@ export interface Policy {
   minControlSize: number;
   controlSizeRules: { selector: string; minSize: number; minViewportWidth?: number; maxViewportWidth?: number }[];
   minControlGap: number;
+  controlGapRules: { selector: string; minGap: number }[];
   minControlInset: number;
   controlContainers: string[];
   contentInsetRules: { selector: string; contentSelector: string; insets: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>> }[];
   iconSizeRules: { selector: string; sizes: number[] }[];
   minLayoutGap: number;
+  alignmentRules: { selector: string; itemSelector: string; alignment: 'start' | 'center' | 'end' }[];
   bannedCopy: string[];
   viewports: { width: number; height: number }[];
   colorSchemes: ('light' | 'dark')[];
