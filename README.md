@@ -75,7 +75,7 @@ await expectUI(page, testInfo, undefined, {
 ```
 
 Checks still use the complete document for clipping, spacing, and accessibility context.
-A finding is included when its target or related element is within a scope root. Document-level findings are outside a component scope. The attachment includes the selected roots and an element count. Other coverage totals and the page size limit still apply to the complete document.
+A finding is included when its target or related element is within a scope root. Document-level findings are outside a component scope. The attachment includes the selected roots. Coverage totals and the page size limit still apply to the complete document.
 
 Use the same options as the third argument to `checkPage(page, policy, options)`.
 In this mode, findings include an `elementKey` when the element has a unique ID or a unique value for the configured data attribute. The data attribute takes priority. Keys in open shadow roots also require a unique key for each host. Use keys to compare findings across states. Findings without a key use the positional selector, which can change when siblings move.

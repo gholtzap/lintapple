@@ -27,7 +27,7 @@ test('a scoped audit keeps page context and groups findings by unique keys', asy
     `));
     const options = { scope: ['#trigger', '#portal'], identityAttribute: 'data-testid' } as const;
     const scoped = await checkPage(page, {}, options);
-    assert.deepEqual(scoped.scope?.selectors, options.scope);
+    assert.deepEqual(scoped.scope, options.scope);
     assert.ok(scoped.findings.some(f => f.rule === 'content-clipping' && f.elementKey === '[id=trigger]' && f.relatedSelector));
     const sizes = (report: typeof scoped) => report.findings.filter(f => f.rule === 'control-size');
     assert.equal(sizes(await checkPage(page)).length, 3);

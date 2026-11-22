@@ -1,8 +1,8 @@
-import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, RuleId, ContrastData } from './types.js';
+import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, RuleId, ContrastData, PageCheckOptions } from './types.js';
 type Bounds = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>;
 interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
 // Runs in the browser. Use one report shape for all design rules.
-export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [], options }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
+export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [], options }: AuditInput & { options?: PageCheckOptions }): Promise<Omit<PageReport, 'frameCoverage'>> {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.iconSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
@@ -700,6 +700,5 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   } finally { contrast.teardown(); }
   const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
-  const scope = options?.scope ? { selectors: options.scope, elements: elements.filter(inReportScope).length } : undefined;
-  return { ...(scope ? { scope } : {}), findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }

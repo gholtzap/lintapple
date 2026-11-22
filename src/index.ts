@@ -110,7 +110,7 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {},
       return parent ? `${path(parent)}/${parent.childFrames().indexOf(frame)}` : 'main';
     };
     const describe = (frame: Frame) => ({ url: frame.url(), name: frame.name(), path: path(frame) });
-    return { ...result, findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
+    return { ...result, ...(options.scope ? { scope: options.scope } : {}), findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
   }
   finally { await Promise.all(handles.map(handle => handle.dispose())); }
 }
