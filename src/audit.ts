@@ -2,19 +2,53 @@ import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, Ru
 type Bounds = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>;
 interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
 // Runs in the browser. Use one report shape for all design rules.
-export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
+export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [], options }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.iconSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
+  const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
+  const roots = options?.scope?.map(value => {
+    const matches = document.querySelectorAll(value);
+    if (matches.length !== 1 || !hasVisibleContent(matches[0]))
+      throw new Error(`Page scope must match one visible element: ${value}`);
+    return matches[0];
+  });
+  const inReportScope = (el: Element): boolean => {
+    if (!roots) return true;
+    for (let node: Element | null = el; node; node = parent(node))
+      if (roots.includes(node)) return true;
+    return false;
+  };
+  const stableKey = (el: Element): string | undefined => {
+    const root = el.getRootNode() as Document | ShadowRoot;
+    const attributes = options?.identityAttribute ? [options.identityAttribute, 'id'] : ['id'];
+    for (const attribute of attributes) {
+      const value = el.getAttribute(attribute);
+      if (!value) continue;
+      const key = `[${attribute}=${CSS.escape(value)}]`;
+      if (root.querySelectorAll(key).length !== 1) continue;
+      if (!(root instanceof ShadowRoot)) return key;
+      const host = stableKey(root.host);
+      if (host) return `${host} >> ${key}`;
+    }
+    return undefined;
+  };
   const findings: Finding[] = [];
   const add: AddFinding = (rule, element, actual, expected, fix, related, details = {}) => {
+    if (!inReportScope(element) && !(related && inReportScope(related))) return;
     const pseudo = details.selector?.match(/::[\w-]+$/)?.[0];
     const exception = policy.exceptions.find(e => e.rules.includes(rule) && (element.matches(e.selector) || !!pseudo && e.selector.endsWith(pseudo) && element.matches(e.selector.slice(0, -pseudo.length))));
     if (exception) { suppressed.push({ rule, selector: selector(element), reason: exception.reason }); return; }
-    findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
+    const elementKey = options?.identityAttribute || roots ? stableKey(element) : undefined;
+    const relatedElementKey = related && (options?.identityAttribute || roots) ? stableKey(related) : undefined;
+    findings.push(format(rule, selector(element), actual, expected, fix, {
+      ...(related ? { relatedSelector: selector(related) } : {}),
+      ...(elementKey ? { elementKey: elementKey + (pseudo ?? '') } : {}),
+      ...(relatedElementKey ? { relatedElementKey } : {}),
+      ...details,
+    }));
   };
   const suppressed: SuppressedFinding[] = [];
-  const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const allElements = document.body ? [document.body, ...descendants(document.body)] : [];
   const elements = allElements.filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
@@ -666,5 +700,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   } finally { contrast.teardown(); }
   const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
-  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+  const scope = options?.scope ? { selectors: options.scope, elements: elements.filter(inReportScope).length } : undefined;
+  return { ...(scope ? { scope } : {}), findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }
