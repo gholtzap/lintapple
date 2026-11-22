@@ -28,7 +28,10 @@ const fixture = (mode: string) => html(`
     };
     const close = () => { tip?.remove(); tip = null; trigger.removeAttribute('aria-describedby'); };
     trigger.addEventListener('mouseenter', open);
-    trigger.addEventListener('mouseleave', close);
+    trigger.addEventListener('mouseleave', () => {
+      if (mode !== 'hoverable') { close(); return; }
+      requestAnimationFrame(() => document.addEventListener('pointermove', close, { once: true }));
+    });
     if (mode !== 'hover-only') trigger.addEventListener('focus', open);
     trigger.addEventListener('blur', close);
     trigger.addEventListener('keydown', event => {
@@ -48,7 +51,7 @@ const policy = { viewports: [screen] };
 test('trigger-only plans check the link on each opening and the tooltip on Escape', async () => {
   const browser = await chromium.launch({ channel: process.env.LINTAPPLE_BROWSER_CHANNEL || undefined });
   try {
-    for (const [mode, expected] of [['good', null], ['absent', 'hover'], ['unlinked', 'tooltip-link'],
+    for (const [mode, expected] of [['good', null], ['hoverable', null], ['absent', 'hover'], ['unlinked', 'tooltip-link'],
       ['hover-only', 'focus'], ['persistent', 'escape'], ['replaced', 'escape']] as const) {
       const page = await browser.newPage({ viewport: screen });
       await page.setContent(fixture(mode));

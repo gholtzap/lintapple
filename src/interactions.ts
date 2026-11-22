@@ -208,7 +208,22 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
   };
   for (const [index, item] of plan.tooltips.entries()) {
     const trigger = await target(item.trigger);
-    await page.mouse.move(-1, -1);
+    const leaveHover = async () => {
+      await page.mouse.move(-1, -1);
+      if (item.tooltip !== undefined) return;
+      // Hoverable tooltips can wait for a pointer move in the document after pointer leave.
+      const point = await trigger.evaluate(async el => {
+        await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const points = [[1, 1], [innerWidth - 2, 1], [1, innerHeight - 2], [innerWidth - 2, innerHeight - 2]];
+        return points.find(([x, y]) => {
+          const target = document.elementFromPoint(x, y);
+          return target && !el.contains(target) &&
+            !target.closest('a, button, input, select, textarea, [tabindex], [role], [title], [aria-describedby], [data-ui-tooltip]');
+        });
+      });
+      if (point) await page.mouse.move(point[0], point[1]);
+    };
+    await leaveHover();
     await trigger.evaluate(el => (el as HTMLElement).blur());
     const openTooltip = async () => item.tooltip === undefined
       ? getLinkedTooltip(item.trigger, true)
@@ -240,7 +255,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
         for (const viewport of policy.viewports) {
           if (viewport.width === originalViewport.width && viewport.height === originalViewport.height) continue;
           await resize(originalViewport);
-          await page.mouse.move(-1, -1);
+          await leaveHover();
           await trigger.hover({ timeout: plan.timeout });
           const reopened = await openTooltip();
           if (!reopened) {
@@ -254,7 +269,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
       } finally { await resize(originalViewport); }
     }
 
-    await page.mouse.move(-1, -1);
+    await leaveHover();
     const hoverSelector = item.tooltip ?? hoverTip;
     const reset = !hoverSelector || await hidden(hoverSelector);
     const reachable = await reach(trigger);
