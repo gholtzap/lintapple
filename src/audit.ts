@@ -27,6 +27,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
     dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
+  const visibleControls = controls.filter(el => !visuallyHidden(el));
   const loadedImages = new Set<Element>();
   await Promise.all(elements.filter(el => el.matches('input[type="image"][src]')).map(async el => {
     const image = new Image();
@@ -142,7 +143,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   }
   const groups = new Map<Node, Element[]>();
-  for (const el of controls) {
+  for (const el of visibleControls) {
     const parent = el.closest('[data-ui-actions]') ?? el.parentElement ?? el.getRootNode();
     const list = groups.get(parent) ?? [];
     list.push(el); groups.set(parent, list);
@@ -262,7 +263,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     return result;
   };
   let insetControls = 0;
-  for (const el of controls) {
+  for (const el of visibleControls) {
     const container = parent(el)?.closest(policy.controlContainers.join(', '));
     if (!container || !visible(container)) continue;
     insetControls++;
@@ -282,7 +283,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   };
   const controlContentCoverage: PageReport['controlContentCoverage'] = { checked: 0, unmeasured: [] };
-  const contentControls = new Set([...controls, ...dropdownControls]);
+  const contentControls = new Set([...visibleControls, ...dropdownControls.filter(el => !visuallyHidden(el))]);
   for (const container of elements) {
     const rule = policy.contentInsetRules.find(rule => container.matches(rule.selector));
     let customContent = 0;
@@ -482,7 +483,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const unresolved = ancestors.some(node => styleOf(node).clipPath !== 'none' && !shapeBounds(node));
     return { width: maxWidth, height: maxHeight, unresolved };
   };
-  for (const el of controls) {
+  for (const el of visibleControls) {
     const rect = reachableSize(el);
     if (rect.unresolved) add('control-size', el, 'clip-path hit area could not be measured', 'a measurable control hit area', 'Review the clipped control hit area.', undefined, { status: 'unresolved' });
     const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
@@ -665,6 +666,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       } catch (error) { reportContrast(el, 'unresolved', data, `placeholder calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
   } finally { contrast.teardown(); }
-  const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
+  const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, parent, add, engine: contrast });
   return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }
