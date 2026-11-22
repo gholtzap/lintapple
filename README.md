@@ -91,7 +91,15 @@ Triggers are discovered through `aria-describedby` references to existing `role=
 
 `accessibilityCoverage.tooltips` lists automatically checked triggers and unmeasured cases. Native `title` tooltips, disabled or unreachable triggers, duplicate IDs, and tooltip elements without a visible declared trigger are reported as unmeasured. Scans check at most 100 declared tooltip relationships per page. These coverage limits alone do not change the exit code. An already-open tooltip has an unresolved opening check and exits with code `1`. Tooltips that fail to open on hover or focus, or fail to close on Escape, produce findings.
 
-An unmarked trigger whose tooltip does not exist until it opens cannot be discovered. Use an explicit interaction plan for it. `checkPage` and `expectUI` remain passive: open the tooltip in your test before calling them. Child frames still need separate checks.
+If a trigger adds `aria-describedby` only while its tooltip is open, select the trigger in an explicit interaction plan and omit the tooltip selector.
+
+```json
+{ "tooltips": [{ "trigger": "#about-requests" }] }
+```
+
+The scan follows `aria-describedby` after hover and keyboard focus. Each opening must name exactly one visible `role="tooltip"` element with text. Its ID can change on each opening. Escape must hide the tooltip and keep focus on the trigger. Other triggers still use the normal checks.
+
+Use this plan with `checkInteractions`, `checkUrl`, or the CLI `--interactions` option. `checkPage` and `expectUI` remain passive. Open the tooltip in your test before calling them. Child frames still need separate checks.
 
 ## Control content insets
 

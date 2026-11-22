@@ -16,7 +16,7 @@ export function validateInteractions(input: unknown): InteractionPlan {
       const item = candidate as { [key: string]: unknown; key?: string; returnFocus?: string };
       const keys = { focus: ['selector'], buttons: ['selector', 'key', 'outcome', 'expectedText'], tooltips: ['trigger', 'tooltip'], dialogs: ['open', 'dialog', 'close', 'returnFocus'] }[kind];
       if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(key => !keys.includes(key))) throw new Error(`Invalid ${kind} interaction.`);
-      for (const key of keys.filter(key => key !== 'returnFocus')) if (typeof item[key] !== 'string' || !item[key].trim()) throw new Error(`${kind} interaction needs ${key}.`);
+      for (const key of keys.filter(key => key !== 'returnFocus' && (key !== 'tooltip' || item.tooltip !== undefined))) if (typeof item[key] !== 'string' || !item[key].trim()) throw new Error(`${kind} interaction needs ${key}.`);
       if (kind === 'buttons' && !['Enter', 'Space'].includes(item.key ?? '')) throw new Error('Button key must be Enter or Space.');
       if (item.returnFocus !== undefined && (typeof item.returnFocus !== 'string' || !item.returnFocus.trim())) throw new Error('returnFocus must be a selector.');
     }
@@ -44,7 +44,7 @@ export function validateInteractions(input: unknown): InteractionPlan {
 export async function runInteractions(page: Page, input: Partial<InteractionPlan>, policy: Policy, checkPage: (page: Page, policy: Policy) => Promise<PageReport>, createVisibility: () => Visibility): Promise<InteractionReport> {
   const plan = validateInteractions(input);
   const findings: Finding[] = [], suppressed: SuppressedFinding[] = [], checks: InteractionCheck[] = [], states: StateReport[] = [];
-  const selectors = plan.focus.map(x => x.selector).concat(plan.buttons.flatMap(x => [x.selector, x.outcome]), plan.tooltips.flatMap(x => [x.trigger, x.tooltip]), plan.dialogs.flatMap(x => [x.open, x.dialog, x.close, x.returnFocus].filter((value): value is string => !!value)));
+  const selectors = plan.focus.map(x => x.selector).concat(plan.buttons.flatMap(x => [x.selector, x.outcome]), plan.tooltips.flatMap(x => x.tooltip === undefined ? [x.trigger] : [x.trigger, x.tooltip]), plan.dialogs.flatMap(x => [x.open, x.dialog, x.close, x.returnFocus].filter((value): value is string => !!value)));
   await page.evaluate(selectors => selectors.forEach(selector => document.querySelector(selector)), selectors);
   const target = async (selector: string) => {
     const locator = page.locator(selector);
@@ -182,40 +182,72 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     await record('focus-obscured', item.selector, exposure.status === 'passed', exposure.actual, 'the focused control to remain visible', 'Keep focused controls in view and clear of sticky bars and overlays.', { status: exposure.status, phase: 'keyboard-focus' });
     await inspect(`focus[${index}]: keyboard focus`);
   }
+  const linkedTooltip = ({ trigger, visibility }: { trigger: string; visibility: Visibility }) => {
+    const element = document.querySelector(trigger);
+    const ids = new Set((element?.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean));
+    const visibleTips = [...ids].flatMap(id => {
+      const selector = `#${CSS.escape(id)}`;
+      const tips = document.querySelectorAll(selector);
+      const tip = tips[0];
+      return tips.length === 1 && tip.getAttribute('role') === 'tooltip' && tip.textContent?.trim() &&
+        visibility.hasVisibleContent(tip) ? [selector] : [];
+    });
+    return visibleTips.length === 1 ? visibleTips[0] : null;
+  };
+  const getLinkedTooltip = async (trigger: string, waitUntilOpen: boolean) => {
+    const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+    try {
+      const input = { trigger, visibility };
+      if (!waitUntilOpen) return await page.evaluate(linkedTooltip, input);
+      let result;
+      try { result = await page.waitForFunction(linkedTooltip, input, { timeout: plan.timeout }); }
+      catch (error) { if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error; return null; }
+      try { return await result.jsonValue(); }
+      finally { await result.dispose(); }
+    } finally { await visibility.dispose(); }
+  };
   for (const [index, item] of plan.tooltips.entries()) {
     const trigger = await target(item.trigger);
     await page.mouse.move(-1, -1);
     await trigger.evaluate(el => (el as HTMLElement).blur());
-    if (!await hidden(item.tooltip)) {
+    const openTooltip = async () => item.tooltip === undefined
+      ? getLinkedTooltip(item.trigger, true)
+      : await shown(item.tooltip) ? item.tooltip : null;
+    const alreadyOpen = item.tooltip === undefined
+      ? Boolean(await getLinkedTooltip(item.trigger, false))
+      : !await hidden(item.tooltip);
+    if (alreadyOpen) {
       await record('icon-button-tooltip', item.trigger, false, 'tooltip is already visible before hover or focus', 'a tooltip that opens for its trigger', 'Use the tooltip open state or use a visible text label.', { phase: 'tooltip-baseline' });
       continue;
     }
     await trigger.hover({ timeout: plan.timeout });
-    const hoverShown = await shown(item.tooltip);
-    const linked = await trigger.evaluate((el, selector) => {
+    let hoverTip = await openTooltip();
+    const linked = item.tooltip === undefined ? Boolean(hoverTip) : await trigger.evaluate((el, selector) => {
       const tip = document.querySelector(selector);
       const ids = `${el.getAttribute('aria-describedby') || ''} ${el.getAttribute('data-ui-tooltip') || ''}`.split(/\s+/);
       return tip?.getAttribute('role') === 'tooltip' && tip?.textContent?.trim() && tip?.id && ids.includes(tip?.id);
     }, item.tooltip);
     await record('icon-button-tooltip', item.trigger, !!linked, 'tooltip has no text, role, or trigger reference', 'a linked role="tooltip" element with text', 'Connect the text tooltip to its trigger.', { phase: 'tooltip-link' });
-    await record('icon-button-tooltip', item.trigger, hoverShown, 'tooltip did not appear on hover', 'a text tooltip on hover', 'Show the tooltip on pointer hover.', { phase: 'hover' });
+    await record('icon-button-tooltip', item.trigger, Boolean(hoverTip), item.tooltip === undefined ? 'no linked text tooltip appeared on hover' : 'tooltip did not appear on hover', 'a text tooltip on hover', 'Show the tooltip on pointer hover.', { phase: 'hover' });
     await inspect(`tooltips[${index}]: hover`);
     const resize = async (viewport: Policy['viewports'][number]) => {
       await page.setViewportSize(viewport);
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     };
     const originalViewport = page.viewportSize();
-    if (hoverShown && originalViewport) {
+    if (hoverTip && originalViewport) {
       try {
         for (const viewport of policy.viewports) {
           if (viewport.width === originalViewport.width && viewport.height === originalViewport.height) continue;
           await resize(originalViewport);
           await page.mouse.move(-1, -1);
           await trigger.hover({ timeout: plan.timeout });
-          if (!await shown(item.tooltip)) {
+          const reopened = await openTooltip();
+          if (!reopened) {
             await record('icon-button-tooltip', item.trigger, false, 'tooltip did not reopen before resize', 'an open tooltip before the resize check', 'Show the tooltip on hover.', { phase: 'tooltip-resize', status: 'unresolved' });
             continue;
           }
+          hoverTip = reopened;
           await resize(viewport);
           await inspect(`tooltips[${index}]: resize ${viewport.width}×${viewport.height}`);
         }
@@ -223,15 +255,18 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     }
 
     await page.mouse.move(-1, -1);
-    const reset = await hidden(item.tooltip);
+    const hoverSelector = item.tooltip ?? hoverTip;
+    const reset = !hoverSelector || await hidden(hoverSelector);
     const reachable = await reach(trigger);
     await record('keyboard-operation', item.trigger, reachable, 'tooltip trigger was not reached within the configured Tab limit', 'a keyboard-reachable tooltip trigger', 'Review the tab order, configured limit, and keyboard navigation.', { phase: 'tooltip-tab', ...(reachable ? {} : { status: 'unresolved' }) });
-    const focusShown = reset && reachable && await shown(item.tooltip);
-    await record('icon-button-tooltip', item.trigger, focusShown, reset ? 'tooltip did not appear on keyboard focus' : 'hover tooltip did not reset before the focus check', 'a text tooltip on keyboard focus', 'Show the tooltip for keyboard focus and clear its hover state.', { phase: 'focus', ...(!reset || !reachable ? { status: 'unresolved' } : {}) });
+    const focusTip = reset && reachable ? await openTooltip() : null;
+    await record('icon-button-tooltip', item.trigger, Boolean(focusTip), reset ? 'tooltip did not appear on keyboard focus' : 'hover tooltip did not reset before the focus check', 'a text tooltip on keyboard focus', 'Show the tooltip for keyboard focus and clear its hover state.', { phase: 'focus', ...(!reset || !reachable ? { status: 'unresolved' } : {}) });
     await inspect(`tooltips[${index}]: keyboard focus`);
-    if (focusShown) {
+    if (focusTip) {
       await page.keyboard.press('Escape');
-      await record('icon-button-tooltip', item.trigger, await hidden(item.tooltip), 'tooltip remained visible after Escape', 'Escape to dismiss the tooltip', 'Close the tooltip on Escape without moving focus.', { phase: 'escape' });
+      const dismissed = await hidden(focusTip) &&
+        (item.tooltip !== undefined || !await getLinkedTooltip(item.trigger, false));
+      await record('icon-button-tooltip', item.trigger, dismissed, 'tooltip remained visible after Escape', 'Escape to dismiss the tooltip', 'Close the tooltip on Escape without moving focus.', { phase: 'escape' });
       await record('keyboard-operation', item.trigger, await focused(trigger), 'Escape moved focus away from the tooltip trigger', 'focus to stay on the tooltip trigger', 'Dismiss the tooltip without moving focus.', { phase: 'tooltip-escape-focus' });
       await inspect(`tooltips[${index}]: Escape`);
     }
