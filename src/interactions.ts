@@ -1,4 +1,4 @@
-import type { Page, Locator } from 'playwright';
+import type { Page, Locator, JSHandle } from 'playwright';
 import type { InteractionPlan, Policy, PageReport, InteractionReport, Finding, SuppressedFinding, InteractionCheck, StateReport, Status, RecordCheck, Wait, Visibility } from './types.js';
 import { finding } from './report.js';
 import { validateWidgets, runWidgets } from './widgets.js';
@@ -199,7 +199,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     try {
       const input = { trigger, visibility };
       if (!waitUntilOpen) return await page.evaluate(linkedTooltip, input);
-      let result;
+      let result: JSHandle<string | null>;
       try { result = await page.waitForFunction(linkedTooltip, input, { timeout: plan.timeout }); }
       catch (error) { if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error; return null; }
       try { return await result.jsonValue(); }
