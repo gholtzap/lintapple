@@ -83,7 +83,7 @@ export function validatePolicy(input: unknown = {}): Policy {
 export async function checkPage(page: Page | Frame, input: Partial<Policy> = {}, options: PageCheckOptions = {}): Promise<PageReport> {
   const policy = validatePolicy(input);
   if (options.scope !== undefined && (!Array.isArray(options.scope) || !options.scope.length ||
-      [...options.scope].some(selector => typeof selector !== 'string' || !selector.trim())))
+      [...options.scope].some((selector: unknown) => typeof selector !== 'string' || !selector.trim())))
     throw new Error('Page scope must be a nonempty list of CSS selectors.');
   if (options.identityAttribute !== undefined && (typeof options.identityAttribute !== 'string' || !/^data-[a-z][a-z0-9_-]*$/.test(options.identityAttribute)))
     throw new Error('The identity attribute must be a lowercase data attribute.');
