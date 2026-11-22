@@ -28,7 +28,7 @@ test('an opaque background isolates placeholder contrast from ancestor backdrop 
     `));
     const findings = (await checkPage(page)).findings.filter(f => f.rule === 'text-contrast');
     const results = await page.evaluate(items => Object.fromEntries(items.map(f =>
-      [document.querySelector(f.selector)?.id, [f.status, f.contrastRatio]])), findings);
+      [document.querySelector(f.selector)?.id ?? '', [f.status, f.contrastRatio]] as const)), findings);
     assert.deepEqual(results, {
       faint: ['failed', 1.66],
       transparent: ['unresolved', undefined],
