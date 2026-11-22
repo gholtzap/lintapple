@@ -142,6 +142,27 @@ The check measures element boxes, including borders and transforms. It works wit
 
 An `icon-size` finding includes the measured width and height and the configured sizes. Icon sizes do not change the minimum control hit area. An 18 px icon can sit inside a larger button.
 
+## Stable bounds after an action
+
+Add `stableBounds` to a named interaction state to check if a change moves or resizes an element. For example, check a revision count when it changes from 9 to 10.
+
+```json
+{
+  "states": [{
+    "name": "Increase revision count",
+    "action": "click",
+    "selector": "#increase",
+    "ready": { "selector": "#revision-count", "expectedText": "10" },
+    "stableBounds": [
+      { "selector": "#revision-count", "properties": ["width"] },
+      { "selector": "#increase", "properties": ["x"], "tolerance": 0.5 }
+    ]
+  }]
+}
+```
+
+Each selector must match one visible element before the action. Lintapple compares its rendered bounds before the action and after the ready condition. Use a ready condition that indicates the end of any transition you want to exclude. The default properties are `width` and `height`. The default tolerance is 1 CSS pixel. The `x` and `y` properties are relative to the viewport, so scrolling can change them.
+
 ## Development
 
 All source, tests, examples, and build scripts use strict TypeScript. Run `npm ci`, then:
