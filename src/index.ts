@@ -17,7 +17,7 @@ import { svgTextContrast } from './svg-contrast.js';
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'native-tooltip-conflict', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'layout-stability', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'native-tooltip-conflict', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
@@ -132,7 +132,7 @@ export async function checkInteractions(page: Page, plan: Partial<InteractionPla
   if (!Number.isInteger(timeout) || timeout < 1) throw new Error('Page-check timeout must be a positive integer.');
   const validated = validateInteractions(plan);
   const policy = validatePolicy(input);
-  return runInteractions(page, validated, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility);
+  return runInteractions(page, validated, policy, (page, policy) => checkPageWithTooltipPlan(page, policy, timeout, validated), createVisibility);
 }
 
 async function checkPageWithin(page: Page | Frame, policy: Policy, timeout: number): Promise<PageReport> {
@@ -144,11 +144,25 @@ async function checkPageWithin(page: Page | Frame, policy: Policy, timeout: numb
   } finally { clearTimeout(timer); }
 }
 
+async function checkPageWithTooltipPlan(page: Page, policy: Policy, timeout: number, plan?: Partial<InteractionPlan>): Promise<PageReport> {
+  const report = await checkPageWithin(page, policy, timeout);
+  const triggers = plan?.tooltips?.filter(item => item.tooltip === undefined).map(item => item.trigger);
+  if (!triggers?.length) return report;
+  const candidates = report.findings.filter(item => item.rule === 'icon-button-tooltip' && item.actual === 'no linked text tooltip');
+  if (!candidates.length) return report;
+  // An explicit interaction check owns the closed-state finding for its trigger.
+  const deferred = await page.evaluate(({ candidates, triggers }) => {
+    const targets = triggers.map(value => document.querySelectorAll(value)).filter(matches => matches.length === 1).map(matches => matches[0]);
+    return candidates.filter(value => !value.includes(' >> ') && targets.includes(document.querySelector(value)!));
+  }, { candidates: candidates.map(item => item.selector), triggers });
+  return { ...report, findings: report.findings.filter(item => !candidates.includes(item) || !deferred.includes(item.selector)) };
+}
+
 export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready, timeout = 15000, interactions }: CheckOptions = {}): Promise<UrlReport> {
   const parsed = new URL(url);
   if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) throw new Error('Use an HTTP, HTTPS, or file URL.');
   const policy = validatePolicy(input);
-  if (interactions !== undefined) validateInteractions(interactions);
+  const plan = interactions === undefined ? undefined : validateInteractions(interactions);
   const browser = await launchBrowser();
   const report: UrlReport = { url, rules: ruleIds, runs: [], findings: [], summary: summarizeFindings([]) };
   try {
@@ -163,7 +177,7 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
           throw new Error(`Page returned HTTP ${response.status()} at ${response.url()}.`);
         }
         if (ready) await page.locator(ready).waitFor({ state: 'visible' });
-        const result = await checkPageWithin(page, policy, timeout);
+        const result = await checkPageWithTooltipPlan(page, policy, timeout, plan);
         const states = [{ name: 'initial', url: page.url(), ...result }];
         const findings: Finding[] = result.findings.map(f => ({ ...f, state: 'initial' }));
         const suppressed: SuppressedFinding[] = result.suppressed.map(f => ({ ...f, state: 'initial' }));
@@ -176,7 +190,7 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
           accessibilityCoverage.interactions = interaction.checks;
           accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : interaction.states.length ? 'not tested: page-state actions only' : 'not tested: empty interaction plan';
         }
-        const automatic = await scanTooltips(page, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility, interactions);
+        const automatic = await scanTooltips(page, policy, (page, policy) => checkPageWithTooltipPlan(page, policy, timeout, plan), createVisibility, plan);
         findings.push(...automatic.findings);
         suppressed.push(...automatic.suppressed);
         states.push(...automatic.states);

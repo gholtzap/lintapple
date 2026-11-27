@@ -111,11 +111,13 @@ export interface MenuStep { key: Key; focus: string; checked?: CheckedState[]; o
 export interface Tabs { selector: string; steps: TabStep[] }
 export interface Menu { selector: string; open?: string; openKey?: 'Enter' | 'Space' | 'ArrowDown' | 'ArrowUp'; steps: MenuStep[] }
 export interface Ready { selector: string; state?: 'visible' | 'hidden'; expectedText?: string }
-export type NamedState = { name: string; selector: string; ready: Ready } & ({ action: 'click' | 'hover' } | { action: 'fill'; value: string } | { action: 'press'; key: string });
+export type Bound = 'x' | 'y' | 'width' | 'height';
+export interface StableBounds { selector: string; properties?: Bound[]; tolerance?: number }
+export type NamedState = { name: string; selector: string; ready: Ready; stableBounds?: StableBounds[] } & ({ action: 'click' | 'hover' } | { action: 'fill'; value: string } | { action: 'press'; key: string });
 export interface InteractionPlan {
   focus: { selector: string }[];
   buttons: { selector: string; key: 'Enter' | 'Space'; outcome: string; expectedText: string }[];
-  tooltips: { trigger: string; tooltip: string }[];
+  tooltips: { trigger: string; tooltip?: string }[];
   dialogs: { open: string; dialog: string; close: string; returnFocus?: string }[];
   tabs: Tabs[];
   menus: Menu[];

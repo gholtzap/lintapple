@@ -128,7 +128,15 @@ Triggers are discovered through `aria-describedby` references to existing `role=
 
 `accessibilityCoverage.tooltips` lists automatically checked triggers and unmeasured cases. Native `title` tooltips, disabled or unreachable triggers, duplicate IDs, and tooltip elements without a visible declared trigger are reported as unmeasured. Scans check at most 100 declared tooltip relationships per page. These coverage limits alone do not change the exit code. An already-open tooltip has an unresolved opening check and exits with code `1`. Tooltips that fail to open on hover or focus, or fail to close on Escape, produce findings.
 
-An unmarked trigger whose tooltip does not exist until it opens cannot be discovered. Use an explicit interaction plan for it. `checkPage` and `expectUI` remain passive: open the tooltip in your test before calling them. Child frames still need separate checks.
+If a trigger adds `aria-describedby` only while its tooltip is open, select the trigger in an explicit interaction plan and omit the tooltip selector.
+
+```json
+{ "tooltips": [{ "trigger": "#about-requests" }] }
+```
+
+The scan follows `aria-describedby` after hover and keyboard focus. Each opening must name exactly one visible `role="tooltip"` element with text. Its ID can change on each opening. Escape must hide the tooltip and keep focus on the trigger. Other triggers still use the normal checks.
+
+Use this plan with `checkInteractions`, `checkUrl`, or the CLI `--interactions` option. `checkPage` and `expectUI` remain passive. Open the tooltip in your test before calling them. Child frames still need separate checks.
 
 While the pointer is over a trigger, an open custom tooltip and an active HTML `title` produce a `native-tooltip-conflict` finding. The check reads the title on the hovered element or its nearest ancestor with a title. An explicit empty `title` stops inheritance. For a custom hover label without `role="tooltip"`, set `data-ui-tooltip` to the label ID and call `checkPage` or `expectUI` while the label is open.
 
@@ -180,6 +188,27 @@ The first rule whose `selector` matches a visible element applies. Each size is 
 The check measures element boxes, including borders and transforms. It works with selected SVG, image, and HTML elements. It does not measure the artwork inside an SVG view box or a pseudo-element. Hidden elements and selectors with no visible matches are skipped. Do not select rectangular icons unless they must use a square box.
 
 An `icon-size` finding includes the measured width and height and the configured sizes. Icon sizes do not change the minimum control hit area. An 18 px icon can sit inside a larger button.
+
+## Stable bounds after an action
+
+Add `stableBounds` to a named interaction state to check if a change moves or resizes an element. For example, check a revision count when it changes from 9 to 10.
+
+```json
+{
+  "states": [{
+    "name": "Increase revision count",
+    "action": "click",
+    "selector": "#increase",
+    "ready": { "selector": "#revision-count", "expectedText": "10" },
+    "stableBounds": [
+      { "selector": "#revision-count", "properties": ["width"] },
+      { "selector": "#increase", "properties": ["x"], "tolerance": 0.5 }
+    ]
+  }]
+}
+```
+
+Each selector must match one visible element before the action. Lintapple compares its rendered bounds before the action and after the ready condition. Use a ready condition that indicates the end of any transition you want to exclude. The default properties are `width` and `height`. The default tolerance is 1 CSS pixel. The `x` and `y` properties are relative to the viewport, so scrolling can change them.
 
 ## Development
 
