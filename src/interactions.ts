@@ -314,6 +314,14 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     await document.fonts.ready;
     await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });
+  const measureBounds = async (selector: string) => {
+    const locator = await target(selector);
+    const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+    try {
+      if (!await locator.evaluate((el, visibility) => visibility.visible(el), visibility)) return null;
+      return await locator.boundingBox({ timeout: plan.timeout });
+    } finally { await visibility.dispose(); }
+  };
   for (const item of plan.states) {
     try {
       await page.evaluate(({ selector, ready, stableBounds }) => {
@@ -322,7 +330,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
       const locator = await target(item.selector);
       if (item.stableBounds) await settleBounds();
       const before = await Promise.all((item.stableBounds ?? []).map(async entry => {
-        const bounds = await (await target(entry.selector)).boundingBox({ timeout: plan.timeout });
+        const bounds = await measureBounds(entry.selector);
         if (!bounds?.width || !bounds.height) throw new Error(`Stable bounds element must be visible before the action: ${entry.selector}`);
         return { entry, bounds };
       }));
@@ -339,7 +347,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
       for (const { entry, bounds } of before) {
         const { selector, properties = ['width', 'height'], tolerance = 1 } = entry;
         const matches = await page.locator(selector).count();
-        const after = matches ? await (await target(selector)).boundingBox({ timeout: plan.timeout }) : null;
+        const after = matches ? await measureBounds(selector) : null;
         const measurable = after && after.width > 0 && after.height > 0;
         const changes = measurable ? properties.filter(key => Math.abs(after[key] - bounds[key]) > tolerance) : [];
         const actual = measurable ? changes.map(key => `${key} changed from ${Number(bounds[key].toFixed(3))}px to ${Number(after[key].toFixed(3))}px`).join(', ') : 'element disappeared after the action';
