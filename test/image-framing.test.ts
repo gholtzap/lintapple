@@ -90,3 +90,20 @@ test('image framing measures the fitted object and distinguishes unmeasured stat
     await assert.rejects(checkPage(page, { fullImageSelectors: ['['] }));
   } finally { await browser.close(); }
 });
+
+test('full-image framing does not pass rounded clips as complete rectangles', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const rounded of ['frame', 'image', 'calculated']) {
+        await page.setContent(fixture('width:120px;height:320px;' + (rounded === 'frame' ? 'border-radius:60px;' : rounded === 'calculated' ? 'border-radius:calc(20% + 1px);' : ''),
+          'width:120px;height:320px;object-fit:contain;' + (rounded === 'image' ? 'border-radius:60px;' : '')));
+        await page.locator('img').evaluate((image: HTMLImageElement) => image.decode());
+        const report = await checkPage(page, policy);
+        assert.equal(report.findings.find(item => item.rule === 'image-framing')?.status, 'unresolved', `${width} ${rounded}`);
+      }
+    }
+  } finally { await browser.close(); }
+});

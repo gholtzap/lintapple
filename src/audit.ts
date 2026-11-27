@@ -677,7 +677,23 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       clips.unshift({ element: el, bounds: overflowClipBounds(el), x: true, y: true, overflowX: 'clip', overflowY: 'clip' });
     for (const clip of clips) {
       const cut = outside(clip.bounds, image, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y'));
-      if (!cut.length) continue;
+      if (!cut.length) {
+        const clipStyle = styleOf(clip.element);
+        const radii = [clipStyle.borderTopLeftRadius, clipStyle.borderTopRightRadius,
+          clipStyle.borderBottomRightRadius, clipStyle.borderBottomLeftRadius];
+        const radius = Math.max(...radii.map(Number.parseFloat));
+        if (radii.some(value => value !== '0px')) {
+          const scale = scaleFor(clip.element);
+          const inset = radius + parseFloat(clipStyle.overflowClipMargin.match(/[\d.]+px/)?.[0] ?? '0');
+          const horizontal = image.left >= clip.bounds.left + inset * scale.x && image.right <= clip.bounds.right - inset * scale.x;
+          const vertical = image.top >= clip.bounds.top + inset * scale.y && image.bottom <= clip.bounds.bottom - inset * scale.y;
+          if (radii.some(value => !/^\d+(?:\.\d+)?px$/.test(value)) || !(horizontal || vertical)) {
+            unresolved('rounded image clips need review');
+            return;
+          }
+        }
+        continue;
+      }
       add('image-framing', el, cut.map(([edge, distance]) => `${edge} crop ${Number((-distance).toFixed(2))}px`).join(', '), expected,
         'Fit the image within its content box and check the size and overflow of its frame.', clip.element === el ? undefined : clip.element);
       return;
