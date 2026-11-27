@@ -310,7 +310,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
             return [...document.querySelectorAll('[role="tooltip"]')].some(el => {
               if (before.includes(el) || !visibility.hasVisibleContent(el)) return false;
               if (!el.id || document.querySelectorAll(`#${CSS.escape(el.id)}`).length !== 1) return true;
-              return !otherOwners.some(owner =>
+              return !otherOwners.some(owner => owner !== el && !el.contains(owner) &&
                 `${owner.getAttribute('aria-describedby') ?? ''} ${owner.getAttribute('data-ui-tooltip') ?? ''}`.split(/\s+/).includes(el.id));
             });
           }, { before: beforeEscape, visibility, trigger: item.trigger });
