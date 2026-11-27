@@ -44,6 +44,7 @@ const fixture = (mode: string) => html(`
     trigger.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         if (mode === 'persistent') trigger.removeAttribute('aria-describedby');
+        else if (mode === 'renamed-orphan' || mode === 'renamed-hidden') { tip.id = 'renamed'; trigger.removeAttribute('aria-describedby'); tip.hidden = mode === 'renamed-hidden'; }
         else if (mode === 'replaced') { close(); open(); }
         else if (mode === 'orphan') { const ghost = tip.cloneNode(true); close(); ghost.id = 'orphan'; document.body.append(ghost); }
         else if (mode === 'orphan-self') { const ghost = tip.cloneNode(true); close(); ghost.id = 'orphan'; ghost.setAttribute('aria-describedby', ghost.id); document.body.append(ghost); }
@@ -62,8 +63,8 @@ const policy = { viewports: [screen] };
 test('trigger-only plans check the link on each opening and the tooltip on Escape', async () => {
   const browser = await chromium.launch({ channel: process.env.LINTAPPLE_BROWSER_CHANNEL || undefined });
   try {
-    for (const [mode, expected] of [['good', null], ['hoverable', null], ['unrelated', null], ['other-trigger', null], ['absent', 'hover'], ['unlinked', 'tooltip-link'],
-      ['hover-only', 'focus'], ['persistent', 'escape'], ['replaced', 'escape'], ['orphan', 'escape'], ['orphan-self', 'escape']] as const) {
+    for (const [mode, expected] of [['good', null], ['renamed-hidden', null], ['hoverable', null], ['unrelated', null], ['other-trigger', null], ['absent', 'hover'], ['unlinked', 'tooltip-link'],
+      ['hover-only', 'focus'], ['persistent', 'escape'], ['renamed-orphan', 'escape'], ['replaced', 'escape'], ['orphan', 'escape'], ['orphan-self', 'escape']] as const) {
       const page = await browser.newPage({ viewport: screen });
       await page.setContent(fixture(mode));
       const baseline = await checkPage(page);
@@ -105,7 +106,7 @@ test('CLI tooltip plans reject visible orphan replacements in both themes and si
   const config = resolve(directory, 'policy.json'), interactions = resolve(directory, 'plan.json');
   await writeFile(config, JSON.stringify({ viewports: [{ width: 390, height: 844 }, { width: 1440, height: 900 }], colorSchemes: ['light', 'dark'] }));
   await writeFile(interactions, JSON.stringify(plan));
-  for (const mode of ['good', 'orphan']) {
+  for (const mode of ['good', 'orphan', 'renamed-orphan']) {
     const file = resolve(directory, `${mode}.html`);
     await writeFile(file, fixture(mode));
     let stdout: string, code = 0;
@@ -117,7 +118,7 @@ test('CLI tooltip plans reject visible orphan replacements in both themes and si
     assert.equal(report.runs.length, 4);
     for (const run of report.runs) {
       const checks = run.accessibilityCoverage.interactions ?? [];
-      assert.ok(checks.some(check => check.phase === 'escape' && check.status === (mode === 'good' ? 'passed' : 'unresolved')));
+      assert.ok(checks.some(check => check.phase === 'escape' && check.status === (mode === 'good' ? 'passed' : mode === 'orphan' ? 'unresolved' : 'failed')));
     }
   }
 });

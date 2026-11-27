@@ -297,18 +297,21 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     if (focusTip) {
       const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
       try {
-        const beforeEscape = await page.evaluateHandle(visibility =>
-          [...document.querySelectorAll('[role="tooltip"]')].filter(visibility.hasVisibleContent), visibility);
+        const beforeEscape = await page.evaluateHandle(({ visibility, selector }) => ({
+          tooltip: document.querySelector(selector),
+          tooltips: [...document.querySelectorAll('[role="tooltip"]')].filter(visibility.hasVisibleContent),
+        }), { visibility, selector: focusTip });
         try {
           await page.keyboard.press('Escape');
-          const dismissed = await hidden(focusTip) &&
+          const dismissed = await wait(({ before, visibility }) => !visibility.hasVisibleContent(before.tooltip),
+            { before: beforeEscape, visibility }) && await hidden(focusTip) &&
             (item.tooltip !== undefined || !await getLinkedTooltip(item.trigger, false));
           const replacement = item.tooltip === undefined && await page.evaluate(({ before, visibility, trigger }) => {
             const current = document.querySelector(trigger);
             const otherOwners = [...document.querySelectorAll('[aria-describedby], [data-ui-tooltip]')]
               .filter(el => el !== current && visibility.hasVisibleContent(el));
             return [...document.querySelectorAll('[role="tooltip"]')].some(el => {
-              if (before.includes(el) || !visibility.hasVisibleContent(el)) return false;
+              if (before.tooltips.includes(el) || !visibility.hasVisibleContent(el)) return false;
               if (!el.id || document.querySelectorAll(`#${CSS.escape(el.id)}`).length !== 1) return true;
               return !otherOwners.some(owner => owner !== el && !el.contains(owner) &&
                 `${owner.getAttribute('aria-describedby') ?? ''} ${owner.getAttribute('data-ui-tooltip') ?? ''}`.split(/\s+/).includes(el.id));
