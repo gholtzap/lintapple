@@ -55,6 +55,29 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   const elements = allElements.filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
+  const hovered = allElements.findLast(el => el.matches(':hover'));
+  let titleOwner: Element | null | undefined = hovered;
+  while (titleOwner && !(titleOwner instanceof HTMLElement && titleOwner.hasAttribute('title')))
+    titleOwner = titleOwner.parentElement;
+  const title = titleOwner?.getAttribute('title');
+  if (title?.trim()) {
+    for (let trigger = hovered; trigger; trigger = parent(trigger) ?? undefined) {
+      const declared = (trigger.getAttribute('data-ui-tooltip') ?? '').split(/\s+/).filter(Boolean);
+      const described = (trigger.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+      const root = trigger.getRootNode() as Document | ShadowRoot;
+      const openLabel = [...new Set([...declared, ...described])].some(id => {
+        const matches = root.querySelectorAll(`#${CSS.escape(id)}`);
+        const label = matches[0];
+        return matches.length === 1 && (declared.includes(id) || label.matches('[role="tooltip"]')) &&
+          !!label.textContent?.trim() && hasVisibleContent(label) && !visuallyHidden(label);
+      });
+      if (!openLabel) continue;
+      add('native-tooltip-conflict', trigger, `an open custom tooltip and a native title=${JSON.stringify(title)}`,
+        'only the custom tooltip on hover', 'Remove the HTML title. Keep the accessible name.',
+        titleOwner === trigger ? null : titleOwner, { category: 'design', phase: 'hover', status: 'failed' });
+      break;
+    }
+  }
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
   let semanticControls: Element[];
   let dropdownControls: Element[];

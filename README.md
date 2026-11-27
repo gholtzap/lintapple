@@ -130,6 +130,8 @@ Triggers are discovered through `aria-describedby` references to existing `role=
 
 An unmarked trigger whose tooltip does not exist until it opens cannot be discovered. Use an explicit interaction plan for it. `checkPage` and `expectUI` remain passive: open the tooltip in your test before calling them. Child frames still need separate checks.
 
+While the pointer is over a trigger, an open custom tooltip and an active HTML `title` produce a `native-tooltip-conflict` finding. The check reads the title on the hovered element or its nearest ancestor with a title. An explicit empty `title` stops inheritance. For a custom hover label without `role="tooltip"`, set `data-ui-tooltip` to the label ID and call `checkPage` or `expectUI` while the label is open.
+
 ## Control content insets
 
 Buttons and custom dropdown controls are checked by default. Their visible text and DOM icons (`svg`, `img`, and `canvas`) need at least 8 px from the inner left and right borders. The check uses rendered text ranges and icon boxes, including transformed and absolute content. It does not require contract attributes. It does not apply to general containers.

@@ -17,7 +17,7 @@ import { svgTextContrast } from './svg-contrast.js';
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'native-tooltip-conflict', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
