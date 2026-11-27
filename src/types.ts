@@ -24,7 +24,13 @@ export interface Policy {
   exceptions: { selector: string; rules: RuleId[]; reason: string }[];
 }
 export type Status = 'passed' | 'failed' | 'unresolved';
+export interface PageCheckOptions {
+  scope?: readonly string[];
+  identityAttribute?: `data-${string}`;
+}
 export interface FindingDetails {
+  elementKey?: string;
+  relatedElementKey?: string;
   viewport?: Policy['viewports'][number];
   selector?: string;
   relatedSelector?: string;
@@ -73,6 +79,7 @@ export interface FindingSummary extends FindingCounts {
   groups: FindingGroup[];
 }
 export interface PageReport {
+  scope?: readonly string[];
   frameCoverage: FrameCoverage;
   findings: Finding[];
   suppressed: SuppressedFinding[];

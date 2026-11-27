@@ -1,5 +1,5 @@
 import type { Page, Frame, JSHandle } from 'playwright';
-import type { Policy, PageReport, InteractionPlan, InteractionReport, CheckOptions, UrlReport, AxeEngine, Visibility, Finding, SuppressedFinding } from './types.js';
+import type { Policy, PageReport, InteractionPlan, InteractionReport, CheckOptions, PageCheckOptions, UrlReport, AxeEngine, Visibility, Finding, SuppressedFinding } from './types.js';
 import policyDefaults from '../ui-policy.json' with { type: 'json' };
 export type * from './types.js';
 import { launchBrowser } from './browser.js';
@@ -80,8 +80,13 @@ export function validatePolicy(input: unknown = {}): Policy {
 }
 
 // Use this API after your test enters a dialog, error state, or signed-in page.
-export async function checkPage(page: Page | Frame, input: Partial<Policy> = {}): Promise<PageReport> {
+export async function checkPage(page: Page | Frame, input: Partial<Policy> = {}, options: PageCheckOptions = {}): Promise<PageReport> {
   const policy = validatePolicy(input);
+  if (options.scope !== undefined && (!Array.isArray(options.scope) || !options.scope.length ||
+      [...options.scope].some((selector: unknown) => typeof selector !== 'string' || !selector.trim())))
+    throw new Error('Page scope must be a nonempty list of CSS selectors.');
+  if (options.identityAttribute !== undefined && (typeof options.identityAttribute !== 'string' || !/^data-[a-z][a-z0-9_-]*$/.test(options.identityAttribute)))
+    throw new Error('The identity attribute must be a lowercase data attribute.');
   await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -97,7 +102,7 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
     handles.push(format);
     const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
     handles.push(visibility);
-    const result = await page.evaluate(audit, { policy, contrast, accessibility, format, visibility, svgContrast });
+    const result = await page.evaluate(audit, { policy, contrast, accessibility, format, visibility, svgContrast, options });
     const frame = 'mainFrame' in page ? page.mainFrame() : page;
     const descendants = (parent: Frame): Frame[] => parent.childFrames().flatMap(child => [child, ...descendants(child)]);
     const path = (frame: Frame): string => {
@@ -105,7 +110,7 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
       return parent ? `${path(parent)}/${parent.childFrames().indexOf(frame)}` : 'main';
     };
     const describe = (frame: Frame) => ({ url: frame.url(), name: frame.name(), path: path(frame) });
-    return { ...result, findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
+    return { ...result, ...(options.scope ? { scope: options.scope } : {}), findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
   }
   finally { await Promise.all(handles.map(handle => handle.dispose())); }
 }
