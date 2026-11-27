@@ -63,6 +63,23 @@ A check with no findings does not prove that omitted frames pass.
 Findings fail the test and attach a JSON report. If a passing page has omitted frames, the helper attaches a coverage report. The helper reads your `ui-policy.json`.
 See the [example tests](examples/playwright/).
 
+### Check part of a page
+
+Pass `scope` to report findings for a component. Each CSS selector must match one visible element in the current document. Add a second selector for a popover or menu rendered in a portal.
+
+```ts
+await expectUI(page, testInfo, undefined, {
+  scope: ['[data-testid="search-trigger"]', '[role="menu"]'],
+  identityAttribute: 'data-testid',
+});
+```
+
+Checks still use the complete document for clipping, spacing, and accessibility context.
+A finding is included when its target or related element is within a scope root. Document-level findings are outside a component scope. The attachment includes the selected roots. Coverage totals and the page size limit still apply to the complete document.
+
+Use the same options as the third argument to `checkPage(page, policy, options)`.
+In this mode, findings include an `elementKey` when the element has a unique ID or a unique value for the configured data attribute. The data attribute takes priority. Keys in open shadow roots also require a unique key for each host. Use keys to compare findings across states. Findings without a key use the positional selector, which can change when siblings move.
+
 ## Mark layout elements
 
 Font, contrast, control size, and screen bounds checks work without extra markup.
@@ -82,6 +99,26 @@ Add these attributes for checks that need layout information:
 
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
+
+### Check existing layout groups
+
+Use `controlGapRules` to set a different minimum gap for a group. Each rule selects the group and sets `minGap` in CSS pixels. For example, a segmented control can use 2 px while other groups keep the default 8 px.
+
+```json
+{ "controlGapRules": [{ "selector": ".segmented-control", "minGap": 2 }] }
+```
+
+Each button belongs to its nearest group selected by a rule or marked with `data-ui-actions`.
+When more than one rule matches a group, the first rule applies. Other groups use `minControlGap`.
+A minimum of 0 allows shared edges. Overlapping buttons still fail.
+
+Use `alignmentRules` to check alignment in existing groups. Each rule selects a group, the items in it, and the horizontal edge or center to compare.
+
+```json
+{ "alignmentRules": [{ "selector": ".project-summary", "itemSelector": ".title, .details", "alignment": "start" }] }
+```
+
+The first rule that matches a group supplies its alignment and item selectors. Nested groups own their items. Groups can still use `data-ui-align` and `data-ui-align-item` without a policy rule.
 
 ## Automatic tooltip checks
 
@@ -149,6 +186,27 @@ The first rule whose `selector` matches a visible element applies. Each size is 
 The check measures element boxes, including borders and transforms. It works with selected SVG, image, and HTML elements. It does not measure the artwork inside an SVG view box or a pseudo-element. Hidden elements and selectors with no visible matches are skipped. Do not select rectangular icons unless they must use a square box.
 
 An `icon-size` finding includes the measured width and height and the configured sizes. Icon sizes do not change the minimum control hit area. An 18 px icon can sit inside a larger button.
+
+## Stable bounds after an action
+
+Add `stableBounds` to a named interaction state to check if a change moves or resizes an element. For example, check a revision count when it changes from 9 to 10.
+
+```json
+{
+  "states": [{
+    "name": "Increase revision count",
+    "action": "click",
+    "selector": "#increase",
+    "ready": { "selector": "#revision-count", "expectedText": "10" },
+    "stableBounds": [
+      { "selector": "#revision-count", "properties": ["width"] },
+      { "selector": "#increase", "properties": ["x"], "tolerance": 0.5 }
+    ]
+  }]
+}
+```
+
+Each selector must match one visible element before the action. Lintapple compares its rendered bounds before the action and after the ready condition. Use a ready condition that indicates the end of any transition you want to exclude. The default properties are `width` and `height`. The default tolerance is 1 CSS pixel. The `x` and `y` properties are relative to the viewport, so scrolling can change them.
 
 ## Development
 

@@ -1,7 +1,9 @@
 import type { Page, Locator } from 'playwright';
-import type { InteractionPlan, Policy, PageReport, InteractionReport, Finding, SuppressedFinding, InteractionCheck, StateReport, Status, RecordCheck, Wait, Visibility } from './types.js';
+import type { InteractionPlan, Policy, PageReport, InteractionReport, Finding, SuppressedFinding, InteractionCheck, StateReport, Status, RecordCheck, Wait, Visibility, Bound } from './types.js';
 import { finding } from './report.js';
 import { validateWidgets, runWidgets } from './widgets.js';
+
+const boundProperties: Bound[] = ['x', 'y', 'width', 'height'];
 
 export function validateInteractions(input: unknown): InteractionPlan {
   const plan = input as Partial<InteractionPlan>;
@@ -26,7 +28,7 @@ export function validateInteractions(input: unknown): InteractionPlan {
   const names = new Set(['initial']);
   for (const item of result.states) {
     if (!item || typeof item !== 'object' || Array.isArray(item) || !['click', 'fill', 'press', 'hover'].includes(item.action)) throw new Error('Each named state needs a supported action.');
-    const keys = ['name', 'action', 'selector', 'ready', ...(item.action === 'fill' ? ['value'] : item.action === 'press' ? ['key'] : [])];
+    const keys = ['name', 'action', 'selector', 'ready', 'stableBounds', ...(item.action === 'fill' ? ['value'] : item.action === 'press' ? ['key'] : [])];
     if (Object.keys(item).some(key => !keys.includes(key))) throw new Error('Unknown named state field.');
     for (const key of ['name', 'selector'] as const) if (typeof item[key] !== 'string' || !item[key].trim()) throw new Error(`Named state needs ${key}.`);
     if (item.name.length > 100 || names.has(item.name) || /^(focus|buttons|tooltips|automatic tooltips|dialogs|tabs|menus)\[\d+\]:/.test(item.name)) throw new Error('State names must be unique, at most 100 characters, and cannot use initial or a generated interaction name.');
@@ -37,6 +39,21 @@ export function validateInteractions(input: unknown): InteractionPlan {
     if (!ready || typeof ready !== 'object' || Array.isArray(ready) || Object.keys(ready).some(key => !['selector', 'state', 'expectedText'].includes(key)) || typeof ready.selector !== 'string' || !ready.selector.trim()) throw new Error('Named state needs a ready selector.');
     if (ready.state !== undefined && !['visible', 'hidden'].includes(ready.state)) throw new Error('Ready state must be visible or hidden.');
     if (ready.expectedText !== undefined && (typeof ready.expectedText !== 'string' || ready.state === 'hidden')) throw new Error('expectedText needs a visible ready element and a string.');
+    if (item.stableBounds !== undefined) {
+      if (!Array.isArray(item.stableBounds) || !item.stableBounds.length || item.stableBounds.length > 100)
+        throw new Error('stableBounds must be a list of 1 to 100 checks.');
+      for (const entry of item.stableBounds) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(key => !['selector', 'properties', 'tolerance'].includes(key)) ||
+            typeof entry.selector !== 'string' || !entry.selector.trim()) throw new Error('Stable bounds need an element selector.');
+        if (entry.properties !== undefined && (!Array.isArray(entry.properties) || !entry.properties.length ||
+            [...entry.properties].some(property => !boundProperties.includes(property)) || new Set(entry.properties).size !== entry.properties.length))
+          throw new Error('Stable bounds properties must be unique values from x, y, width, and height.');
+        if (entry.tolerance !== undefined && (!Number.isFinite(entry.tolerance) || entry.tolerance < 0))
+          throw new Error('Stable bounds tolerance must be a finite nonnegative number of CSS pixels.');
+      }
+      if (new Set(item.stableBounds.map(entry => entry.selector)).size !== item.stableBounds.length)
+        throw new Error('Stable bounds selectors must be unique within a state.');
+    }
   }
   return result;
 }
@@ -59,7 +76,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     const locator = page.locator(selector);
     const exception = await locator.count() === 1 ? await locator.evaluate((el, { exceptions, rule }) => exceptions.find(e => e.rules.includes(rule) && el.matches(e.selector)), { exceptions: policy.exceptions, rule }) : null;
     if (exception) { suppressed.push({ rule, selector, reason: exception.reason }); return; }
-    findings.push(finding(rule, selector, actual ?? '', expected, fix, { documentUrl: page.url(), framePath: 'main', category: rule === 'icon-button-tooltip' ? 'design' : 'accessibility', ...details, status }));
+    findings.push(finding(rule, selector, actual ?? '', expected, fix, { documentUrl: page.url(), framePath: 'main', category: rule === 'icon-button-tooltip' || rule === 'layout-stability' ? 'design' : 'accessibility', ...details, status }));
   };
   const wait: Wait = async (fn, argument) => {
     try { await page.waitForFunction(fn, argument, { timeout: plan.timeout }); return true; }
@@ -353,10 +370,30 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     }
   }
   await runWidgets(page, plan, { target, record, wait, reach, shown, hidden, inspect, createVisibility });
+  const settleBounds = () => page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  const measureBounds = async (selector: string) => {
+    const locator = await target(selector);
+    const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+    try {
+      if (!await locator.evaluate((el, visibility) => visibility.visible(el), visibility)) return null;
+      return await locator.boundingBox({ timeout: plan.timeout });
+    } finally { await visibility.dispose(); }
+  };
   for (const item of plan.states) {
     try {
-      await page.evaluate(({ selector, ready }) => { document.querySelector(selector); document.querySelector(ready.selector); }, item);
+      await page.evaluate(({ selector, ready, stableBounds }) => {
+        [selector, ready.selector, ...(stableBounds ?? []).map(entry => entry.selector)].forEach(value => document.querySelector(value));
+      }, item);
       const locator = await target(item.selector);
+      if (item.stableBounds) await settleBounds();
+      const before = await Promise.all((item.stableBounds ?? []).map(async entry => {
+        const bounds = await measureBounds(entry.selector);
+        if (!bounds?.width || !bounds.height) throw new Error(`Stable bounds element must be visible before the action: ${entry.selector}`);
+        return { entry, bounds };
+      }));
       if (item.action === 'fill') await locator.fill(item.value, { timeout: plan.timeout });
       else if (item.action === 'press') await locator.press(item.key, { timeout: plan.timeout });
       else await locator[item.action]({ timeout: plan.timeout });
@@ -366,6 +403,19 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
         throw new Error(item.ready.expectedText === undefined ? 'Timeout waiting for the ready element.' : 'Ready text did not match.');
       if (await ready.count() > 1) throw new Error(`Ready selector must match at most one element: ${item.ready.selector}`);
       if (await ready.count() === 1) await target(item.ready.selector);
+      if (before.length) await settleBounds();
+      for (const { entry, bounds } of before) {
+        const { selector, properties = ['width', 'height'], tolerance = 1 } = entry;
+        const matches = await page.locator(selector).count();
+        const after = matches ? await measureBounds(selector) : null;
+        const measurable = after && after.width > 0 && after.height > 0;
+        const changes = measurable ? properties.filter(key => Math.abs(after[key] - bounds[key]) > tolerance) : [];
+        const actual = measurable ? changes.map(key => `${key} changed from ${Number(bounds[key].toFixed(3))}px to ${Number(after[key].toFixed(3))}px`).join(', ') : 'element disappeared after the action';
+        await record('layout-stability', selector, Boolean(measurable && !changes.length), actual,
+          `${properties.join(', ')} to change by at most ${tolerance}px`,
+          'Reserve space for changing content or keep the measured element anchored.',
+          { state: item.name, phase: 'stable-bounds', ...(page.viewportSize() ? { viewport: page.viewportSize()! } : {}) });
+      }
     } catch (error) { throw new Error(`State "${item.name}" could not be checked: ${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
     await inspect(item.name);
   }
