@@ -117,7 +117,7 @@ export type NamedState = { name: string; selector: string; ready: Ready; stableB
 export interface InteractionPlan {
   focus: { selector: string }[];
   buttons: { selector: string; key: 'Enter' | 'Space'; outcome: string; expectedText: string }[];
-  tooltips: { trigger: string; tooltip: string }[];
+  tooltips: { trigger: string; tooltip?: string }[];
   dialogs: { open: string; dialog: string; close: string; returnFocus?: string }[];
   tabs: Tabs[];
   menus: Menu[];
