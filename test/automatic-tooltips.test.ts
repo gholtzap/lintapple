@@ -176,3 +176,28 @@ test('an automatic tooltip scan reports a native title conflict in the hover sta
     { rule: 'native-tooltip-conflict', phase: 'hover', state: 'automatic tooltips[0]: hover' },
   ]);
 });
+
+test('native title conflicts use rendered label text', async () => {
+  await mkdir(directory, { recursive: true });
+  const browser = await chromium.launch();
+  const mismatches: { width: number; colorScheme: string; generated: boolean; found: boolean }[] = [];
+  try {
+    for (const width of [390, 1440]) for (const colorScheme of ['light', 'dark'] as const) for (const generated of [true, false]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
+      try {
+        const content = fixture('good').replace('id="trigger"', 'id="trigger" title="Download review"')
+          .replace('Download review</div>', generated ? '</div>' : '<span hidden>Download review</span></div>')
+          .replace('</style>', generated ? '#tip::before{content:"Download review"}</style>' : '</style>');
+        await page.setContent(content);
+        await page.locator('#trigger').hover();
+        await page.locator('#tip').waitFor({ state: 'visible' });
+        if (generated) assert.match(await page.locator('#tip').ariaSnapshot(), /Download review/);
+        const report = await checkPage(page);
+        const found = report.findings.some(f => f.rule === 'native-tooltip-conflict');
+        await writeFile(resolve(directory, `rendered-${width}-${colorScheme}-${generated}.json`), JSON.stringify(report, null, 2));
+        if (found !== generated) mismatches.push({ width, colorScheme, generated, found });
+      } finally { await page.close(); }
+    }
+    assert.deepEqual(mismatches, []);
+  } finally { await browser.close(); }
+});

@@ -75,7 +75,9 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         const matches = root.querySelectorAll(`#${CSS.escape(id)}`);
         const label = matches[0];
         return matches.length === 1 && (declared.includes(id) || label.matches('[role="tooltip"]')) &&
-          !!label.textContent?.trim() && hasVisibleContent(label) && !visuallyHidden(label);
+          hasVisibleContent(label) && !visuallyHidden(label) &&
+          [label, ...descendants(label)].some(node => visible(node) && !visuallyHidden(node) &&
+            (textRects(node).length > 0 || generatedTextStyles(node).length > 0));
       });
       if (!openLabel) continue;
       add('native-tooltip-conflict', trigger, `an open custom tooltip and a native title=${JSON.stringify(title)}`,
