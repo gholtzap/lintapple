@@ -46,6 +46,12 @@ export function validatePolicy(input: unknown = {}): Policy {
     }
     if ((rule.minViewportWidth ?? 1) > (rule.maxViewportWidth ?? 10000)) throw new Error('Control size rule viewport bounds must be in increasing order.');
   }
+  if (!Array.isArray(policy.controlGapRules)) throw new Error('controlGapRules must be a list.');
+  for (const rule of policy.controlGapRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'minGap'].includes(key)) ||
+        typeof rule.selector !== 'string' || !rule.selector.trim() || !Number.isFinite(rule.minGap) || rule.minGap < 0)
+      throw new Error('Each control gap rule needs a selector and a finite nonnegative minGap.');
+  }
   if (!Array.isArray(policy.contentInsetRules)) throw new Error('contentInsetRules must be a list.');
   for (const rule of policy.contentInsetRules) {
     if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'contentSelector', 'insets'].includes(key)) ||
@@ -65,6 +71,13 @@ export function validatePolicy(input: unknown = {}): Policy {
     for (const size of rule.sizes) positive(size, 'icon-size sizes');
   }
   positive(policy.minLayoutGap, 'minLayoutGap');
+  if (!Array.isArray(policy.alignmentRules)) throw new Error('alignmentRules must be a list.');
+  for (const rule of policy.alignmentRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'itemSelector', 'alignment'].includes(key)) ||
+        typeof rule.selector !== 'string' || !rule.selector.trim() || typeof rule.itemSelector !== 'string' || !rule.itemSelector.trim() ||
+        !['start', 'center', 'end'].includes(rule.alignment))
+      throw new Error('Each alignment rule needs a group selector, item selector, and start, center, or end alignment.');
+  }
   positive(policy.minControlInset, 'minControlInset');
   strings(policy.controlContainers, 'controlContainers');
   if (!Array.isArray(policy.viewports) || !policy.viewports.length) throw new Error('viewports must be a nonempty list.');

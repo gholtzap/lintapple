@@ -100,6 +100,26 @@ Add these attributes for checks that need layout information:
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
 
+### Check existing layout groups
+
+Use `controlGapRules` to set a different minimum gap for a group. Each rule selects the group and sets `minGap` in CSS pixels. For example, a segmented control can use 2 px while other groups keep the default 8 px.
+
+```json
+{ "controlGapRules": [{ "selector": ".segmented-control", "minGap": 2 }] }
+```
+
+Each button belongs to its nearest group selected by a rule or marked with `data-ui-actions`.
+When more than one rule matches a group, the first rule applies. Other groups use `minControlGap`.
+A minimum of 0 allows shared edges. Overlapping buttons still fail.
+
+Use `alignmentRules` to check alignment in existing groups. Each rule selects a group, the items in it, and the horizontal edge or center to compare.
+
+```json
+{ "alignmentRules": [{ "selector": ".project-summary", "itemSelector": ".title, .details", "alignment": "start" }] }
+```
+
+The first rule that matches a group supplies its alignment and item selectors. Nested groups own their items. Groups can still use `data-ui-align` and `data-ui-align-item` without a policy rule.
+
 ## Automatic tooltip checks
 
 CLI and `checkUrl` scans open declared tooltips on hover and keyboard focus. They check the rendered page in each open state and check Escape dismissal and focus retention. While the hover tooltip is open, they resize to the other configured viewports. A tooltip can close on resize; if it stays open, it must fit. Resize findings retain the actual screen size.

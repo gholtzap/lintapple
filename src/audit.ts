@@ -4,7 +4,9 @@ interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
 // Runs in the browser. Use one report shape for all design rules.
 export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [], options }: AuditInput & { options?: PageCheckOptions }): Promise<Omit<PageReport, 'frameCoverage'>> {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.iconSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
+  for (const rule of policy.controlGapRules) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
+  for (const rule of policy.alignmentRules) { document.querySelector(rule.selector); document.querySelector(rule.itemSelector); }
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
   const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const roots = options?.scope?.map(value => {
@@ -177,10 +179,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   }
   const groups = new Map<Node, Element[]>();
+  const actionGroups = ['[data-ui-actions]', ...policy.controlGapRules.map(rule => rule.selector)].join(', ');
   for (const el of controls) {
-    const parent = el.closest('[data-ui-actions]') ?? el.parentElement ?? el.getRootNode();
-    const list = groups.get(parent) ?? [];
-    list.push(el); groups.set(parent, list);
+    const group = el.closest(actionGroups) ?? el.parentElement ?? el.getRootNode();
+    const list = groups.get(group) ?? [];
+    list.push(el); groups.set(group, list);
   }
   // Use the same geometry for control groups and component stacks.
   const checkGap = (group: Element[], rule: RuleId, minimum: number) => {
@@ -193,17 +196,24 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         add(rule, group[i], `${Number(gap.toFixed(2))}px`, `a gap of at least ${minimum}px`, 'Use a layout group with an approved gap. Check for overlap.', group[j]);
     }
   };
-  for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
+  for (const [owner, group] of groups) {
+    const rule = owner instanceof Element ? policy.controlGapRules.find(rule => owner.matches(rule.selector)) : undefined;
+    checkGap(group, 'control-gap', rule?.minGap ?? policy.minControlGap);
+  }
   const layoutChildren = (el: Element): Element[] => [...el.children].flatMap(child =>
     getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
   for (const el of allElements.filter(el => el.matches('[data-ui-stack]')).filter(hasVisibleContent))
     checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
   let alignmentGroups = 0;
-  for (const group of allElements.filter(el => el.matches('[data-ui-align]')).filter(hasVisibleContent)) {
-    const alignment = group.getAttribute('data-ui-align');
-    const items = [...group.querySelectorAll('[data-ui-align-item]')].filter(el => el.closest('[data-ui-align]') === group);
+  const alignments = ['[data-ui-align]', ...policy.alignmentRules.map(rule => rule.selector)].join(', ');
+  for (const group of allElements.filter(el => el.matches(alignments)).filter(hasVisibleContent)) {
+    const rule = policy.alignmentRules.find(rule => group.matches(rule.selector));
+    const alignment = rule?.alignment ?? group.getAttribute('data-ui-align');
+    const items = [...group.querySelectorAll(rule?.itemSelector ?? '[data-ui-align-item]')]
+      .filter(el => el.closest(alignments) === group);
     if (!['start', 'center', 'end'].includes(alignment ?? '') || items.length < 2) {
-      add('layout-alignment', group, `${alignment || 'empty alignment'} with ${items.length} marked items`, 'start, center, or end alignment with at least two marked items', 'Set data-ui-align and mark the elements that must align with data-ui-align-item.');
+      add('layout-alignment', group, `${alignment || 'empty alignment'} with ${items.length} marked items`, 'start, center, or end alignment with at least two marked items',
+        rule ? 'Select at least two items in the alignment rule.' : 'Set data-ui-align and mark the elements that must align with data-ui-align-item.');
       continue;
     }
     const targets = items.filter(visible);
