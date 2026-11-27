@@ -21,6 +21,14 @@ export interface Policy {
   fullImageSelectors: string[];
   minLayoutGap: number;
   alignmentRules: { selector: string; itemSelector: string; alignment: 'start' | 'center' | 'end' }[];
+  layoutSeparationRules: {
+    selector: string;
+    before: string;
+    after: string;
+    axis: 'horizontal' | 'vertical';
+    minGap: number;
+    maxGap?: number;
+  }[];
   bannedCopy: string[];
   viewports: { width: number; height: number }[];
   colorSchemes: ('light' | 'dark')[];

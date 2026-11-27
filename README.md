@@ -208,6 +208,39 @@ rounded corners, obstruction by other elements, or cropping inside the source
 artwork. It skips hidden and unmatched images. Use a browser assertion if the
 state must include a particular image.
 
+## Check the gap between two elements
+
+Use `layoutSeparationRules` to check the order and gap between two parts of
+a component. For example, require the caption to sit below the artwork and
+within 8 px of it:
+
+```json
+{
+  "layoutSeparationRules": [
+    {
+      "selector": ".card",
+      "before": ".artwork",
+      "after": ".caption",
+      "axis": "vertical",
+      "minGap": 0,
+      "maxGap": 8
+    }
+  ]
+}
+```
+
+The default list is empty. Each rule applies to each matching group with
+visible content. Both endpoint selectors must match one distinct visible
+element in the group. Elements in nested matching groups belong to those groups.
+Missing or ambiguous endpoints produce an unresolved finding. Select the parent
+state where both parts are required if a part is intentionally absent in other states.
+
+The check measures the gap between rendered boxes in CSS pixels, from top to
+bottom for `vertical` and in the group's text direction for `horizontal`.
+Overlap or reversed order gives a negative gap. Set `minGap` to zero to allow
+edges to touch. Leave out `maxGap` to check only the minimum. The tolerance is
+0.1 px. Other spacing and alignment checks still apply.
+
 ## Stable bounds after an action
 
 Add `stableBounds` to a named interaction state to check if a change moves or resizes an element. For example, check a revision count when it changes from 9 to 10.

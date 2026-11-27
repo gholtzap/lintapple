@@ -9,6 +9,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const rule of policy.alignmentRules) { document.querySelector(rule.selector); document.querySelector(rule.itemSelector); }
   for (const selector of policy.fullImageSelectors) document.querySelector(selector);
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
+  for (const rule of policy.layoutSeparationRules) {
+    document.querySelector(rule.selector);
+    document.querySelector(rule.before);
+    document.querySelector(rule.after);
+  }
   const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const roots = options?.scope?.map(value => {
     const matches = document.querySelectorAll(value);
@@ -228,6 +233,30 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
   for (const el of allElements.filter(el => el.matches('[data-ui-stack]')).filter(hasVisibleContent))
     checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
+  for (const rule of policy.layoutSeparationRules) {
+    for (const group of allElements.filter(el => el.matches(rule.selector) && hasVisibleContent(el))) {
+      const targets = (query: string) => [...group.querySelectorAll(query)].filter(el => {
+        const bounds = el.getBoundingClientRect();
+        return el.closest(rule.selector) === group && bounds.width > 0 && bounds.height > 0 && visible(el) && !visuallyHidden(el);
+      });
+      const before = targets(rule.before), after = targets(rule.after);
+      const relation = `${rule.axis} separation from ${rule.before} to ${rule.after}`;
+      const range = rule.maxGap === undefined ? `at least ${rule.minGap}px` : `${rule.minGap} to ${rule.maxGap}px`;
+      if (before.length !== 1 || after.length !== 1 || before[0] === after[0]) {
+        const actual = before.length === 1 && after.length === 1 ? 'both selectors match the same element' : `${before.length} before and ${after.length} after matches`;
+        add('layout-separation', group, actual, `one distinct visible element per selector for ${relation}`,
+          'Use selectors that match one visible element in this group and state.', undefined, { status: 'unresolved' });
+        continue;
+      }
+      const a = before[0].getBoundingClientRect(), b = after[0].getBoundingClientRect();
+      const gap = rule.axis === 'vertical' ? b.top - a.bottom
+        : getComputedStyle(group).direction === 'rtl' ? a.left - b.right : b.left - a.right;
+      if (gap < rule.minGap - 0.1 || gap > (rule.maxGap ?? Infinity) + 0.1) {
+        add('layout-separation', after[0], `${Number(gap.toFixed(2))}px`, `${relation} of ${range}`,
+          'Place the elements in the expected order with the specified gap.', before[0]);
+      }
+    }
+  }
   let alignmentGroups = 0;
   const alignments = ['[data-ui-align]', ...policy.alignmentRules.map(rule => rule.selector)].join(', ');
   for (const group of allElements.filter(el => el.matches(alignments)).filter(hasVisibleContent)) {
