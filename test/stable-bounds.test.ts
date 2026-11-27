@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { checkInteractions } from '../src/index.js';
 import { validateInteractions } from '../src/interactions.js';
@@ -49,13 +50,14 @@ test('stable bounds report growth, movement, and disappearing elements', async (
   } finally { await browser.close(); }
 });
 
-test('stable bounds time out when a font stalls before or after the action', { timeout: 8000 }, async t => {
+test('stable bounds time out when a font stalls before or after the action', async t => {
   const browser = await chromium.launch({ channel: process.env.LINTAPPLE_BROWSER_CHANNEL || undefined });
   t.after(() => browser.close());
 
   const state = { ...plan.states![0], stableBounds: [{ selector: '#count' }] };
   for (const phase of ['before', 'after']) {
     const page = await browser.newPage();
+    const watchdog = new AbortController();
     try {
       // Hold the request open until the page closes.
       await page.route('https://example.test/stalled.woff2', () => {});
@@ -73,12 +75,20 @@ test('stable bounds time out when a font stalls before or after the action', { t
         </script>
       `), { waitUntil: 'domcontentloaded' });
 
-      await assert.rejects(checkInteractions(page, { timeout: 500, states: [state] }), {
+      await assert.rejects(Promise.race([
+        checkInteractions(page, { timeout: 2000, states: [state] }),
+        delay(10000, undefined, { signal: watchdog.signal }).then(() => {
+          throw new Error('The stable bounds check did not return.');
+        }),
+      ]), {
         message: `State "Increase revision count" could not be checked: Timeout waiting for fonts and layout ${phase} the action.`,
       });
       assert.equal(await page.evaluate(() => document.fonts.status), 'loading');
       assert.equal(await page.locator('#count').textContent(), phase === 'before' ? '9' : '10');
-    } finally { await page.close(); }
+    } finally {
+      watchdog.abort();
+      await page.close();
+    }
   }
 });
 
