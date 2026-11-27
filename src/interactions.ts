@@ -303,9 +303,17 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
           await page.keyboard.press('Escape');
           const dismissed = await hidden(focusTip) &&
             (item.tooltip !== undefined || !await getLinkedTooltip(item.trigger, false));
-          const replacement = item.tooltip === undefined && await page.evaluate(({ before, visibility }) =>
-            [...document.querySelectorAll('[role="tooltip"]')].some(el => !before.includes(el) && visibility.hasVisibleContent(el)),
-          { before: beforeEscape, visibility });
+          const replacement = item.tooltip === undefined && await page.evaluate(({ before, visibility, trigger }) => {
+            const current = document.querySelector(trigger);
+            const otherOwners = [...document.querySelectorAll('[aria-describedby], [data-ui-tooltip]')]
+              .filter(el => el !== current && visibility.hasVisibleContent(el));
+            return [...document.querySelectorAll('[role="tooltip"]')].some(el => {
+              if (before.includes(el) || !visibility.hasVisibleContent(el)) return false;
+              if (!el.id || document.querySelectorAll(`#${CSS.escape(el.id)}`).length !== 1) return true;
+              return !otherOwners.some(owner =>
+                `${owner.getAttribute('aria-describedby') ?? ''} ${owner.getAttribute('data-ui-tooltip') ?? ''}`.split(/\s+/).includes(el.id));
+            });
+          }, { before: beforeEscape, visibility, trigger: item.trigger });
           const uncertain = dismissed && replacement;
           await record('icon-button-tooltip', item.trigger, dismissed && !replacement,
             uncertain ? 'a new unlinked tooltip is visible after Escape' : 'tooltip remained visible after Escape',
