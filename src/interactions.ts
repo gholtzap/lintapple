@@ -382,10 +382,19 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     }
   }
   await runWidgets(page, plan, { target, record, wait, reach, shown, hidden, inspect, createVisibility });
-  const settleBounds = () => page.evaluate(async () => {
-    await document.fonts.ready;
-    await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  });
+  const settleBounds = async (phase: 'before' | 'after') => {
+    try {
+      const settled = await page.waitForFunction(async () => {
+        await document.fonts.ready;
+        await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return true;
+      }, undefined, { timeout: plan.timeout });
+      await settled.dispose();
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
+      throw new Error(`Timeout waiting for fonts and layout ${phase} the action.`, { cause: error });
+    }
+  };
   const measureBounds = async (selector: string) => {
     const locator = await target(selector);
     const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
@@ -400,7 +409,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
         [selector, ready.selector, ...(stableBounds ?? []).map(entry => entry.selector)].forEach(value => document.querySelector(value));
       }, item);
       const locator = await target(item.selector);
-      if (item.stableBounds) await settleBounds();
+      if (item.stableBounds) await settleBounds('before');
       const before = await Promise.all((item.stableBounds ?? []).map(async entry => {
         const bounds = await measureBounds(entry.selector);
         if (!bounds?.width || !bounds.height) throw new Error(`Stable bounds element must be visible before the action: ${entry.selector}`);
@@ -415,7 +424,7 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
         throw new Error(item.ready.expectedText === undefined ? 'Timeout waiting for the ready element.' : 'Ready text did not match.');
       if (await ready.count() > 1) throw new Error(`Ready selector must match at most one element: ${item.ready.selector}`);
       if (await ready.count() === 1) await target(item.ready.selector);
-      if (before.length) await settleBounds();
+      if (before.length) await settleBounds('after');
       for (const { entry, bounds } of before) {
         const { selector, properties = ['width', 'height'], tolerance = 1 } = entry;
         const matches = await page.locator(selector).count();
