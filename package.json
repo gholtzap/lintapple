@@ -37,7 +37,9 @@
     "demo:highlight": "npm run build && node dist/scripts/highlight-demo.js",
     "build": "tsc && node dist/scripts/build-assets.js",
     "typecheck": "tsc --noEmit",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "source:example": "npm run build && node dist/bin/lintapple.js source examples/source/src/bad.tsx --config examples/source/eslint.config.mjs",
+    "source:example:good": "npm run build && node dist/bin/lintapple.js source examples/source/src/good.tsx --config examples/source/eslint.config.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -47,7 +49,10 @@
     "playwright": "1.63.0"
   },
   "devDependencies": {
+    "@shadcn/lint": "0.2.5",
     "@types/node": "^22.20.5",
+    "@typescript-eslint/parser": "8.74.0",
+    "eslint": "10.15.0",
     "shiki": "4.5.0",
     "typescript": "^5.9.3"
   },

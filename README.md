@@ -4,7 +4,7 @@
 
 It should be impossible for AI to make a bad UI.
 
-**A UI linter for web pages.** Run it from your terminal or Playwright tests to check rendered pages against fixed design rules.
+**A UI linter for web pages.** Run it from your terminal or Playwright tests to check rendered pages against fixed design rules. The optional source command checks design system use in your code through ESLint and `@shadcn/lint`.
 
 [npm](https://www.npmjs.com/package/lintapple) · [Demo](https://lintapple.vercel.app/)
 
@@ -42,6 +42,66 @@ npx lintapple http://localhost:3000 --json
 ```
 
 For a page that loads asynchronously, add `--ready '[data-app-ready]'` with a selector that is visible when the page is ready.
+
+## Check source code
+
+`lintapple <url>` checks the rendered page. `lintapple source` reads source files and runs the project's enabled `shadcn/*` rules through ESLint. It does not start a browser.
+
+To try the examples from this repository:
+
+```sh
+npm ci
+npm run source:example
+npm run source:example:good
+```
+
+The first example reports raw colors and arbitrary spacing, and exits with code `1`. The corrected example exits with code `0`. Edit `examples/source/src/bad.tsx` and run the first command again to try a fix.
+
+For your own React and Tailwind v4 project, install the source tools:
+
+```sh
+npm install -D eslint @shadcn/lint @typescript-eslint/parser
+```
+
+Use ESLint 9.30 or later in major version 9 or 10. Each tool's Node.js requirements also apply. The example uses ESLint 10, which requires Node.js 22.13 or later on the Node.js 22 release line.
+
+Add the following block to your existing ESLint flat configuration. If you have no configuration, save it as `eslint.config.mjs`. Keep your existing parser setup if it already supports TSX.
+
+```js
+import { plugin as shadcn } from '@shadcn/lint';
+import tsParser from '@typescript-eslint/parser';
+
+export default [{
+  files: ['**/*.{ts,tsx}'],
+  languageOptions: {
+    parser: tsParser,
+    parserOptions: { ecmaFeatures: { jsx: true } },
+  },
+  plugins: { shadcn },
+  rules: {
+    'shadcn/no-raw-colors': 'error',
+    'shadcn/no-arbitrary-values': 'error',
+    'shadcn/require-static-classes': 'error',
+  },
+}];
+```
+
+Then run:
+
+```sh
+npx lintapple source src
+npx lintapple source 'src/**/*.tsx' --json
+```
+
+Paths default to the current directory. Quote globs so ESLint can expand them. `--config path` selects an ESLint configuration for this command. Source rules stay in ESLint configuration; `ui-policy.json` is only for browser checks. Normal `lintapple init` still sets up browser checks.
+
+Only rules registered under `shadcn/*` run. Other ESLint rules still need your normal lint command. The source tools are optional and are not installed by Lintapple. Use [shadcn/lint's configuration guide](https://github.com/shadcn-ui/lint#settings) to connect your theme and components, or enable component rules such as `no-restyle`.
+
+Text output lists checked files and their enabled rules, findings with file locations, and files without design checks. JSON output keeps ESLint messages and suggestions, plus `files`, `skipped`, `errors`, and `status`. Suggestions are not applied. ESLint ignores and inline suppressions apply.
+
+Exit codes: `0` means the enabled rules passed on the listed files; `1` means findings, including warnings; `2` means the check could not finish. Parser errors, missing setup, and a scan with no files that have design rules are not passes. Files listed as skipped have no design-check coverage. Configuration and startup errors go to stderr, including with `--json`.
+
+This first version supports ESLint with `@shadcn/lint`. The example checks TSX; standalone CSS files are not checked. It does not check component replacement or component count limits. It does not check layout, contrast, or browser behavior. Run the URL command or your Playwright checks for those checks.
 
 ## Use in Playwright
 
