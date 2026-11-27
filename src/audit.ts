@@ -54,13 +54,14 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
-  let controls: Element[];
+  let semanticControls: Element[];
   let dropdownControls: Element[];
   contrast.setup(document);
   try {
-    controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
+    semanticControls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
     dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
+  const controls = semanticControls.filter(el => !visuallyHidden(el));
   const loadedImages = new Set<Element>();
   await Promise.all(elements.filter(el => el.matches('input[type="image"][src]')).map(async el => {
     const image = new Image();
@@ -316,7 +317,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   };
   const controlContentCoverage: PageReport['controlContentCoverage'] = { checked: 0, unmeasured: [] };
-  const contentControls = new Set([...controls, ...dropdownControls]);
+  const contentControls = new Set([...controls, ...dropdownControls.filter(el => !visuallyHidden(el))]);
   for (const container of elements) {
     const rule = policy.contentInsetRules.find(rule => container.matches(rule.selector));
     let customContent = 0;
@@ -672,16 +673,38 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         if (ratio < required) reportContrast(el, 'failed', { ...data, contrastRatio: Math.floor(ratio * 100) / 100, fgColor: blended.toHexString(), bgColor: background.toHexString() });
       } catch (error) { reportContrast(el, 'unresolved', data, `boxless text calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
+    const coversPlaceholder = (node: Element, style: CSSStyleDeclaration, content: Bounds) => {
+      if (!(node instanceof HTMLElement) || node.getClientRects().length !== 1 ||
+          style.backgroundImage !== 'none' || style.clipPath !== 'none' ||
+          style.maskImage !== 'none' || !['border-box', 'padding-box', 'content-box'].includes(style.backgroundClip)) return false;
+      const transform = transformFor(node);
+      if (transform.b !== 0 || transform.c !== 0 || transform.a <= 0 || transform.d <= 0) return false;
+      const corners = [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius];
+      if (corners.some(radius => !/^\d+(?:\.\d+)?px$/.test(radius))) return false;
+      const radius = Math.max(...corners.map(Number.parseFloat));
+      // The middle strips of a rounded box are opaque even when its corners are not.
+      const box = style.backgroundClip as 'border-box' | 'padding-box' | 'content-box';
+      const fits = (bounds: Bounds) => Object.values(edgeInsets(bounds, content)).every(distance => distance >= 0);
+      if (!fits(clientBounds(node, box, [0, radius, 0, radius])) &&
+          !fits(clientBounds(node, box, [radius, 0, radius, 0]))) return false;
+      try { return new contrast.commons.color.Color().parseString(style.backgroundColor).alpha === 1; }
+      catch { return false; }
+    };
     for (const el of elements.filter(el => el.matches('input:placeholder-shown, textarea:placeholder-shown') && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'))) {
       const style = placeholderStyle(el);
       if (!style) continue;
       const size = parseFloat(style.fontSize), bold = parseFloat(style.fontWeight) >= 700;
       const required = size >= 24 || (bold && size >= 56 / 3) ? 3 : 4.5;
       const data = { expectedContrastRatio: `${required}:1` };
-      let unsupported = false;
+      let unsupported = false, opaqueBackdrop = false;
+      const content = clientBounds(el, 'content-box');
       for (let node: Element | null = el; node; node = parent(node)) {
         const nodeStyle = getComputedStyle(node);
-        if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
+        if (!opaqueBackdrop) {
+          if (nodeStyle.backdropFilter !== 'none') unsupported = true;
+          opaqueBackdrop = coversPlaceholder(node, nodeStyle, content);
+        }
+        if ((nodeStyle.display !== 'contents' && (parseFloat(nodeStyle.opacity) !== 1 || nodeStyle.maskImage !== 'none')) || nodeStyle.filter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
       }
       if (unsupported || parseFloat(style.webkitTextStrokeWidth) > 0 || style.textShadow !== 'none' || style.filter !== 'none' || style.mixBlendMode !== 'normal') {
         reportContrast(el, 'unresolved', data, 'placeholder opacity, strokes, filters, blend modes, or text shadows need review');
@@ -699,6 +722,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       } catch (error) { reportContrast(el, 'unresolved', data, `placeholder calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
   } finally { contrast.teardown(); }
-  const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
-  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+  const accessibilityCoverage = await accessibility({ elements, controls: semanticControls, visible, hasVisibleContent, parent, add, engine: contrast });
+  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: semanticControls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }
