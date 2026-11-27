@@ -1,7 +1,12 @@
 import type { AccessibilityInput, AccessibilityCoverage, RuleId } from './types.js';
 // Runs in the browser with the same scope and report helpers as the layout audit.
-export async function auditAccessibility({ elements, controls, visible, hasVisibleContent, add, engine }: AccessibilityInput): Promise<AccessibilityCoverage> {
+export async function auditAccessibility({ elements, controls, visible, hasVisibleContent, parent, add, engine }: AccessibilityInput): Promise<AccessibilityCoverage> {
   const byId = (el: Element, id: string) => (el.getRootNode() as Document | ShadowRoot).getElementById(id);
+  const ariaHidden = (el: Element) => {
+    for (let node: Element | null = el; node; node = parent(node))
+      if (node.getAttribute('aria-hidden')?.toLowerCase() === 'true') return true;
+    return false;
+  };
   const unmeasured: NonNullable<AccessibilityCoverage['tooltips']>['unmeasured'] = [];
   const rules: Record<string, RuleId> = {
     'button-name': 'accessible-name', 'input-button-name': 'accessible-name',
@@ -42,6 +47,7 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
         if (resolved && checks.length && checks.every(check => check.id === 'aria-valid-attr-value' && check.data?.messageKey === 'controlsWithinPopup')) continue;
       }
       const id = rules[rule.id];
+      if (id === 'form-label' && ariaHidden(el)) continue;
       const key = `${id}:${elements.indexOf(el)}`;
       if (reported.has(key)) continue;
       reported.add(key);
@@ -71,7 +77,7 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
         const missing = ids.filter(id => !byId(el, id));
         if (!ids.length || missing.length) add('aria-reference', el, `${attr}: ${missing.join(', ') || 'empty reference'}`, 'ARIA references to existing element IDs', 'Correct the IDs or render the referenced elements.', null, { status: 'failed', category: 'accessibility' });
       }
-      if (el.matches('input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]), textarea, select')) {
+      if (!ariaHidden(el) && el.matches('input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]), textarea, select')) {
         const named = el.getAttribute('aria-label')?.trim() || refs(el).some(ref => ref && labelText(ref)) || [...((el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).labels || [])].some(label => hasLabelText(label, el));
         if (!named && !reported.has(`form-label:${elements.indexOf(el)}`)) add('form-label', el, 'no label beyond a placeholder or title', 'a programmatic form label', 'Use a label element, aria-label, or aria-labelledby. Keep placeholders as examples.', null, { status: 'failed', category: 'accessibility' });
       }

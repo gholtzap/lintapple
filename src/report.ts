@@ -9,7 +9,7 @@ export function summarizeFindings(findings: readonly (Finding & { viewport?: Pol
   let unresolved = 0;
   for (const item of findings) {
     const status = item.status === 'unresolved' ? 'unresolved' : 'failed';
-    const key = JSON.stringify([item.rule, item.selector, item.relatedSelector, item.expected, item.fix, status, item.phase, item.sourceRule, item.documentUrl, item.framePath, item.category, item.focusSelector, item.outcomeSelector]);
+    const key = JSON.stringify([item.rule, item.elementKey ? ['key', item.elementKey] : item.selector, item.relatedElementKey ? ['key', item.relatedElementKey] : item.relatedSelector, item.expected, item.fix, status, item.phase, item.sourceRule, item.documentUrl, item.framePath, item.category, item.focusSelector, item.outcomeSelector]);
     let counts = byRule.get(item.rule);
     if (!counts) { counts = { rule: item.rule, occurrences: 0, problems: 0, failed: 0, unresolved: 0 }; byRule.set(item.rule, counts); }
     counts.occurrences++; counts[status]++;
