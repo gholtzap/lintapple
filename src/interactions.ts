@@ -306,7 +306,11 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
           const replacement = item.tooltip === undefined && await page.evaluate(({ before, visibility }) =>
             [...document.querySelectorAll('[role="tooltip"]')].some(el => !before.includes(el) && visibility.hasVisibleContent(el)),
           { before: beforeEscape, visibility });
-          await record('icon-button-tooltip', item.trigger, dismissed && !replacement, 'tooltip remained visible after Escape', 'Escape to dismiss the tooltip', 'Close the tooltip on Escape without moving focus.', { phase: 'escape' });
+          const uncertain = dismissed && replacement;
+          await record('icon-button-tooltip', item.trigger, dismissed && !replacement,
+            uncertain ? 'a new unlinked tooltip is visible after Escape' : 'tooltip remained visible after Escape',
+            'Escape to dismiss the tooltip', 'Close the tooltip on Escape without moving focus.',
+            { phase: 'escape', ...(uncertain ? { status: 'unresolved' } : {}) });
           await record('keyboard-operation', item.trigger, await focused(trigger), 'Escape moved focus away from the tooltip trigger', 'focus to stay on the tooltip trigger', 'Dismiss the tooltip without moving focus.', { phase: 'tooltip-escape-focus' });
           await inspect(`tooltips[${index}]: Escape`);
         } finally { await beforeEscape.dispose(); }

@@ -3,6 +3,13 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { assertProcessError } from './assert-process-error.js';
+import type { UrlReport } from '../src/types.js';
 import { checkInteractions, checkPage, checkUrl } from '../src/index.js';
 import { html } from './audit-cases.js';
 
@@ -44,6 +51,7 @@ const fixture = (mode: string) => html(`
     });
     trigger.addEventListener('click', () => document.body.dataset.clicked = 'yes');
   </script>
+  ${mode === 'unrelated' ? '<span id="other-help" role="tooltip" style="left:400px">Other help</span>' : ''}
 `);
 const plan = { tooltips: [{ trigger: '#trigger' }], timeout: 600 };
 const screen = { width: 800, height: 600 };
@@ -52,7 +60,7 @@ const policy = { viewports: [screen] };
 test('trigger-only plans check the link on each opening and the tooltip on Escape', async () => {
   const browser = await chromium.launch({ channel: process.env.LINTAPPLE_BROWSER_CHANNEL || undefined });
   try {
-    for (const [mode, expected] of [['good', null], ['hoverable', null], ['absent', 'hover'], ['unlinked', 'tooltip-link'],
+    for (const [mode, expected] of [['good', null], ['hoverable', null], ['unrelated', null], ['absent', 'hover'], ['unlinked', 'tooltip-link'],
       ['hover-only', 'focus'], ['persistent', 'escape'], ['replaced', 'escape'], ['orphan', 'escape']] as const) {
       const page = await browser.newPage({ viewport: screen });
       await page.setContent(fixture(mode));
@@ -86,4 +94,28 @@ test('URL checks defer only the declared trigger to the interaction plan', async
     assert.match(findings[0].selector, /button:nth-of-type\(2\)$/);
     assert.ok(report.runs[0].accessibilityCoverage.interactions?.some(c => c.phase === 'escape' && c.status === 'passed'));
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+
+test('CLI tooltip plans reject visible orphan replacements in both themes and sizes', async () => {
+  const directory = resolve('test-results/lazy-tooltip-cli');
+  await mkdir(directory, { recursive: true });
+  const config = resolve(directory, 'policy.json'), interactions = resolve(directory, 'plan.json');
+  await writeFile(config, JSON.stringify({ viewports: [{ width: 390, height: 844 }, { width: 1440, height: 900 }], colorSchemes: ['light', 'dark'] }));
+  await writeFile(interactions, JSON.stringify(plan));
+  for (const mode of ['good', 'orphan']) {
+    const file = resolve(directory, `${mode}.html`);
+    await writeFile(file, fixture(mode));
+    let stdout: string, code = 0;
+    try { ({ stdout } = await promisify(execFile)(process.execPath, ['dist/bin/lintapple.js', pathToFileURL(file).href, '--config', config, '--interactions', interactions, '--json'])); }
+    catch (error) { assertProcessError(error); assert.equal(typeof error.code, 'number'); code = Number(error.code); stdout = error.stdout; }
+    const report: UrlReport = JSON.parse(stdout);
+    await writeFile(`${file}.json`, stdout);
+    assert.equal(code, mode === 'good' ? 0 : 1);
+    assert.equal(report.runs.length, 4);
+    for (const run of report.runs) {
+      const checks = run.accessibilityCoverage.interactions ?? [];
+      assert.ok(checks.some(check => check.phase === 'escape' && check.status === (mode === 'good' ? 'passed' : 'unresolved')));
+    }
+  }
 });
