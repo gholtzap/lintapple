@@ -414,6 +414,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     return false;
   };
   const viewport = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: document.documentElement.clientHeight };
+  const containsPaint = (style: CSSStyleDeclaration) => /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
+  const overflowClipBounds = (el: Element) => {
+    const value = styleOf(el).overflowClipMargin;
+    const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
+    const margin = parseFloat(value.match(/[\d.]+px/)?.[0] ?? '0');
+    const bounds = clientBounds(el, reference), scale = scaleFor(el);
+    return {
+      left: bounds.left - margin * scale.x,
+      right: bounds.right + margin * scale.x,
+      top: bounds.top - margin * scale.y,
+      bottom: bounds.bottom + margin * scale.y,
+    };
+  };
   const contextFor = (el: Element) => {
     const ancestors: Element[] = [];
     let containingBlock: Element | null = null;
@@ -431,24 +444,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
     const clips = ancestors.filter(node => node instanceof SVGSVGElement || node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => {
       const style = styleOf(node);
-      const paint = /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
+      const paint = containsPaint(style);
       const overflowX = paint && style.overflowX === 'visible' ? 'clip' : style.overflowX;
       const overflowY = paint && style.overflowY === 'visible' ? 'clip' : style.overflowY;
       return { element: node, overflowX, overflowY, x: /^(hidden|clip)$/.test(overflowX) || /^(auto|scroll)$/.test(overflowX) && !scrolls(node, 'X'), y: /^(hidden|clip)$/.test(overflowY) || /^(auto|scroll)$/.test(overflowY) && !scrolls(node, 'Y') };
     }).filter(clip => clip.x || clip.y).map(clip => {
-      const style = styleOf(clip.element);
-      const value = style.overflowClipMargin;
-      const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
-      const margin = parseFloat(value.match(/[\d.]+px/)?.[0] ?? '0');
       const base = clientBounds(clip.element);
-      const expanded = clientBounds(clip.element, reference);
-      const scale = scaleFor(clip.element);
       const x = clip.overflowX === 'clip', y = clip.overflowY === 'clip';
+      const expanded = x || y ? overflowClipBounds(clip.element) : base;
       return { ...clip, bounds: {
-        left: x ? expanded.left - margin * scale.x : base.left,
-        right: x ? expanded.right + margin * scale.x : base.right,
-        top: y ? expanded.top - margin * scale.y : base.top,
-        bottom: y ? expanded.bottom + margin * scale.y : base.bottom,
+        left: x ? expanded.left : base.left,
+        right: x ? expanded.right : base.right,
+        top: y ? expanded.top : base.top,
+        bottom: y ? expanded.bottom : base.bottom,
       } };
     });
     return {
@@ -603,7 +611,15 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const left = content.left + (transform.a < 0 ? width - imageWidth - x : x) * scale.x;
     const top = content.top + (transform.d < 0 ? height - imageHeight - y : y) * scale.y;
     const image = { left, top, right: left + imageWidth * scale.x, bottom: top + imageHeight * scale.y };
-    for (const clip of [{ element: el, bounds: content, x: true, y: true }, ...context.clips.filter(clip => clip.element !== el)]) {
+    const clips = context.clips.filter(clip => clip.element !== el);
+    // Chromium uses the clip margin for replaced content even for hidden or auto overflow.
+    if (style.overflowX !== style.overflowY) {
+      unresolved('the image uses different overflow modes on each axis');
+      return;
+    }
+    if (style.overflowX !== 'visible' || containsPaint(style))
+      clips.unshift({ element: el, bounds: overflowClipBounds(el), x: true, y: true, overflowX: 'clip', overflowY: 'clip' });
+    for (const clip of clips) {
       const cut = outside(clip.bounds, image, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y'));
       if (!cut.length) continue;
       add('image-framing', el, cut.map(([edge, distance]) => `${edge} crop ${Number((-distance).toFixed(2))}px`).join(', '), expected,

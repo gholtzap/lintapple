@@ -68,6 +68,18 @@ test('image framing measures the fitted object and distinguishes unmeasured stat
     assert.equal(broken?.actual, 'image dimensions are unavailable');
     assert.equal(broken?.status, 'unresolved');
 
+    const cover = size + 'object-fit: cover; display: inline;';
+    await page.setContent(fixture('width: 500px; height: 560px;', cover));
+    assert.match((await checkPage(page, policy)).findings.find(item => item.rule === 'image-framing')?.actual ?? '', /top crop/);
+    await page.setContent(fixture('width: 500px; height: 560px;', cover + 'overflow: visible;'));
+    assert.ok(!(await checkPage(page, policy)).findings.some(item => item.rule === 'image-framing'));
+    await page.setContent(fixture(frame, cover + 'overflow: visible;'));
+    const ancestor = (await checkPage(page, policy)).findings.find(item => item.rule === 'image-framing');
+    assert.match(ancestor?.actual ?? '', /top crop/);
+    assert.match(ancestor?.relatedSelector ?? '', /div/);
+    await page.setContent(fixture('width: 500px; height: 560px;', cover + 'overflow-clip-margin: 200px;'));
+    assert.ok(!(await checkPage(page, policy)).findings.some(item => item.rule === 'image-framing'));
+
     await assert.rejects(checkPage(page, { fullImageSelectors: ['['] }));
   } finally { await browser.close(); }
 });

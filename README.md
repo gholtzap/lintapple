@@ -186,16 +186,17 @@ For example, set `"fullImageSelectors": [".asset-preview img"]` in `ui-policy.js
 The default list is empty. Leave intentionally cropped thumbnails out of the list.
 
 The check uses the loaded image dimensions, the content box, `object-fit`, and
-`object-position`. It checks for image content outside the content box or a
-rectangular overflow or paint clip on an ancestor. A finding identifies the edge,
+`object-position`. It checks for image content outside a rectangular overflow
+or paint clip on the image or an ancestor. A finding identifies the edge,
 the cut in CSS pixels, and the clipping ancestor when applicable. A cut of 1 px
 or less is within tolerance.
 
 Check the preview after the image loads. Unavailable image dimensions, masks,
-clip paths, and transforms that prevent rectangular measurement produce unresolved
-findings. The check does not measure rounded corners, obstruction by other
-elements, or cropping inside the source artwork. It skips hidden and unmatched
-images. Use a browser assertion if the state must include a particular image.
+clip paths, mixed overflow modes on an image, and transforms that prevent
+rectangular measurement produce unresolved findings. The check does not measure
+rounded corners, obstruction by other elements, or cropping inside the source
+artwork. It skips hidden and unmatched images. Use a browser assertion if the
+state must include a particular image.
 
 ## Development
 
