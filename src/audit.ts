@@ -669,7 +669,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
           if (nodeStyle.backdropFilter !== 'none') unsupported = true;
           opaqueBackdrop = coversPlaceholder(node, nodeStyle, content);
         }
-        if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
+        if ((nodeStyle.display !== 'contents' && (parseFloat(nodeStyle.opacity) !== 1 || nodeStyle.maskImage !== 'none')) || nodeStyle.filter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
       }
       if (unsupported || parseFloat(style.webkitTextStrokeWidth) > 0 || style.textShadow !== 'none' || style.filter !== 'none' || style.mixBlendMode !== 'normal') {
         reportContrast(el, 'unresolved', data, 'placeholder opacity, strokes, filters, blend modes, or text shadows need review');
