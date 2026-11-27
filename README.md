@@ -138,6 +138,8 @@ The scan follows `aria-describedby` after hover and keyboard focus. Each opening
 
 Use this plan with `checkInteractions`, `checkUrl`, or the CLI `--interactions` option. `checkPage` and `expectUI` remain passive. Open the tooltip in your test before calling them. Child frames still need separate checks.
 
+While the pointer is over a trigger, an open custom tooltip and an active HTML `title` produce a `native-tooltip-conflict` finding. The check reads the title on the hovered element or its nearest ancestor with a title. An explicit empty `title` stops inheritance. For a custom hover label without `role="tooltip"`, set `data-ui-tooltip` to the label ID and call `checkPage` or `expectUI` while the label is open.
+
 ## Control content insets
 
 Buttons and custom dropdown controls are checked by default. Their visible text and DOM icons (`svg`, `img`, and `canvas`) need at least 8 px from the inner left and right borders. The check uses rendered text ranges and icon boxes, including transformed and absolute content. It does not require contract attributes. It does not apply to general containers.
@@ -186,6 +188,58 @@ The first rule whose `selector` matches a visible element applies. Each size is 
 The check measures element boxes, including borders and transforms. It works with selected SVG, image, and HTML elements. It does not measure the artwork inside an SVG view box or a pseudo-element. Hidden elements and selectors with no visible matches are skipped. Do not select rectangular icons unless they must use a square box.
 
 An `icon-size` finding includes the measured width and height and the configured sizes. Icon sizes do not change the minimum control hit area. An 18 px icon can sit inside a larger button.
+
+## Check full-image previews
+
+Use `fullImageSelectors` to select visible `img` elements that must show the full image.
+For example, set `"fullImageSelectors": [".asset-preview img"]` in `ui-policy.json`.
+The default list is empty. Leave intentionally cropped thumbnails out of the list.
+
+The check uses the loaded image dimensions, the content box, `object-fit`, and
+`object-position`. It checks for image content outside a rectangular overflow
+or paint clip on the image or an ancestor. A finding identifies the edge,
+the cut in CSS pixels, and the clipping ancestor when applicable. A cut of 1 px
+or less is within tolerance.
+
+Check the preview after the image loads. Unavailable image dimensions, masks,
+clip paths, mixed overflow modes on an image, and transforms that prevent
+rectangular measurement produce unresolved findings. The check does not measure
+rounded corners, obstruction by other elements, or cropping inside the source
+artwork. It skips hidden and unmatched images. Use a browser assertion if the
+state must include a particular image.
+
+## Check the gap between two elements
+
+Use `layoutSeparationRules` to check the order and gap between two parts of
+a component. For example, require the caption to sit below the artwork and
+within 8 px of it:
+
+```json
+{
+  "layoutSeparationRules": [
+    {
+      "selector": ".card",
+      "before": ".artwork",
+      "after": ".caption",
+      "axis": "vertical",
+      "minGap": 0,
+      "maxGap": 8
+    }
+  ]
+}
+```
+
+The default list is empty. Each rule applies to each matching group with
+visible content. Both endpoint selectors must match one distinct visible
+element in the group. Elements in nested matching groups belong to those groups.
+Missing or ambiguous endpoints produce an unresolved finding. Select the parent
+state where both parts are required if a part is intentionally absent in other states.
+
+The check measures the gap between rendered boxes in CSS pixels, from top to
+bottom for `vertical` and in the group's text direction for `horizontal`.
+Overlap or reversed order gives a negative gap. Set `minGap` to zero to allow
+edges to touch. Leave out `maxGap` to check only the minimum. The tolerance is
+0.1 px. Other spacing and alignment checks still apply.
 
 ## Stable bounds after an action
 

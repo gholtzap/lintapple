@@ -7,7 +7,13 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const rule of policy.controlGapRules) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   for (const rule of policy.alignmentRules) { document.querySelector(rule.selector); document.querySelector(rule.itemSelector); }
+  for (const selector of policy.fullImageSelectors) document.querySelector(selector);
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
+  for (const rule of policy.layoutSeparationRules) {
+    document.querySelector(rule.selector);
+    document.querySelector(rule.before);
+    document.querySelector(rule.after);
+  }
   const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const roots = options?.scope?.map(value => {
     const matches = document.querySelectorAll(value);
@@ -55,6 +61,31 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   const elements = allElements.filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
+  const hovered = allElements.findLast(el => el.matches(':hover'));
+  let titleOwner: Element | null | undefined = hovered;
+  while (titleOwner && !(titleOwner instanceof HTMLElement && titleOwner.hasAttribute('title')))
+    titleOwner = titleOwner.parentElement;
+  const title = titleOwner?.getAttribute('title');
+  if (title?.trim()) {
+    for (let trigger = hovered; trigger; trigger = parent(trigger) ?? undefined) {
+      const declared = (trigger.getAttribute('data-ui-tooltip') ?? '').split(/\s+/).filter(Boolean);
+      const described = (trigger.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+      const root = trigger.getRootNode() as Document | ShadowRoot;
+      const openLabel = [...new Set([...declared, ...described])].some(id => {
+        const matches = root.querySelectorAll(`#${CSS.escape(id)}`);
+        const label = matches[0];
+        return matches.length === 1 && (declared.includes(id) || label.matches('[role="tooltip"]')) &&
+          hasVisibleContent(label) && !visuallyHidden(label) &&
+          [label, ...descendants(label)].some(node => visible(node) && !visuallyHidden(node) &&
+            (textRects(node).length > 0 || generatedTextStyles(node).length > 0));
+      });
+      if (!openLabel) continue;
+      add('native-tooltip-conflict', trigger, `an open custom tooltip and a native title=${JSON.stringify(title)}`,
+        'only the custom tooltip on hover', 'Remove the HTML title. Keep the accessible name.',
+        titleOwner === trigger ? null : titleOwner, { category: 'design', phase: 'hover', status: 'failed' });
+      break;
+    }
+  }
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
   let semanticControls: Element[];
   let dropdownControls: Element[];
@@ -204,6 +235,30 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
   for (const el of allElements.filter(el => el.matches('[data-ui-stack]')).filter(hasVisibleContent))
     checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
+  for (const rule of policy.layoutSeparationRules) {
+    for (const group of allElements.filter(el => el.matches(rule.selector) && hasVisibleContent(el))) {
+      const targets = (query: string) => [...group.querySelectorAll(query)].filter(el => {
+        const bounds = el.getBoundingClientRect();
+        return el.closest(rule.selector) === group && bounds.width > 0 && bounds.height > 0 && visible(el) && !visuallyHidden(el);
+      });
+      const before = targets(rule.before), after = targets(rule.after);
+      const relation = `${rule.axis} separation from ${rule.before} to ${rule.after}`;
+      const range = rule.maxGap === undefined ? `at least ${rule.minGap}px` : `${rule.minGap} to ${rule.maxGap}px`;
+      if (before.length !== 1 || after.length !== 1 || before[0] === after[0]) {
+        const actual = before.length === 1 && after.length === 1 ? 'both selectors match the same element' : `${before.length} before and ${after.length} after matches`;
+        add('layout-separation', group, actual, `one distinct visible element per selector for ${relation}`,
+          'Use selectors that match one visible element in this group and state.', undefined, { status: 'unresolved' });
+        continue;
+      }
+      const a = before[0].getBoundingClientRect(), b = after[0].getBoundingClientRect();
+      const gap = rule.axis === 'vertical' ? b.top - a.bottom
+        : getComputedStyle(group).direction === 'rtl' ? a.left - b.right : b.left - a.right;
+      if (gap < rule.minGap - 0.1 || gap > (rule.maxGap ?? Infinity) + 0.1) {
+        add('layout-separation', after[0], `${Number(gap.toFixed(2))}px`, `${relation} of ${range}`,
+          'Place the elements in the expected order with the specified gap.', before[0]);
+      }
+    }
+  }
   let alignmentGroups = 0;
   const alignments = ['[data-ui-align]', ...policy.alignmentRules.map(rule => rule.selector)].join(', ');
   for (const group of allElements.filter(el => el.matches(alignments)).filter(hasVisibleContent)) {
@@ -413,6 +468,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     return false;
   };
   const viewport = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: document.documentElement.clientHeight };
+  const containsPaint = (style: CSSStyleDeclaration) => /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
+  const overflowClipBounds = (el: Element) => {
+    const value = styleOf(el).overflowClipMargin;
+    const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
+    const margin = parseFloat(value.match(/[\d.]+px/)?.[0] ?? '0');
+    const bounds = clientBounds(el, reference), scale = scaleFor(el);
+    return {
+      left: bounds.left - margin * scale.x,
+      right: bounds.right + margin * scale.x,
+      top: bounds.top - margin * scale.y,
+      bottom: bounds.bottom + margin * scale.y,
+    };
+  };
   const contextFor = (el: Element) => {
     const ancestors: Element[] = [];
     let containingBlock: Element | null = null;
@@ -430,24 +498,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
     const clips = ancestors.filter(node => node instanceof SVGSVGElement || node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => {
       const style = styleOf(node);
-      const paint = /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
+      const paint = containsPaint(style);
       const overflowX = paint && style.overflowX === 'visible' ? 'clip' : style.overflowX;
       const overflowY = paint && style.overflowY === 'visible' ? 'clip' : style.overflowY;
       return { element: node, overflowX, overflowY, x: /^(hidden|clip)$/.test(overflowX) || /^(auto|scroll)$/.test(overflowX) && !scrolls(node, 'X'), y: /^(hidden|clip)$/.test(overflowY) || /^(auto|scroll)$/.test(overflowY) && !scrolls(node, 'Y') };
     }).filter(clip => clip.x || clip.y).map(clip => {
-      const style = styleOf(clip.element);
-      const value = style.overflowClipMargin;
-      const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
-      const margin = parseFloat(value.match(/[\d.]+px/)?.[0] ?? '0');
       const base = clientBounds(clip.element);
-      const expanded = clientBounds(clip.element, reference);
-      const scale = scaleFor(clip.element);
       const x = clip.overflowX === 'clip', y = clip.overflowY === 'clip';
+      const expanded = x || y ? overflowClipBounds(clip.element) : base;
       return { ...clip, bounds: {
-        left: x ? expanded.left - margin * scale.x : base.left,
-        right: x ? expanded.right + margin * scale.x : base.right,
-        top: y ? expanded.top - margin * scale.y : base.top,
-        bottom: y ? expanded.bottom + margin * scale.y : base.bottom,
+        left: x ? expanded.left : base.left,
+        right: x ? expanded.right : base.right,
+        top: y ? expanded.top : base.top,
+        bottom: y ? expanded.bottom : base.bottom,
       } };
     });
     return {
@@ -543,6 +606,99 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
   }
   const outside = (bounds: Bounds, rect: Bounds, x: boolean, y: boolean) => Object.entries(edgeInsets(bounds, rect)).filter(([edge, distance]) => distance < -1 && ((edge === 'left' || edge === 'right') ? x : y));
+  const imageSelector = policy.fullImageSelectors.join(', ');
+  const checkFullImage = (el: HTMLImageElement, context: ReturnType<typeof contextFor>) => {
+    const expected = 'the full image inside its frame';
+    const unresolved = (actual: string) => add('image-framing', el, actual, expected, 'Check this image in the tested state.', undefined, { status: 'unresolved' });
+    if (!el.complete || !el.naturalWidth || !el.naturalHeight) {
+      unresolved('image dimensions are unavailable');
+      return;
+    }
+    const style = styleOf(el);
+    const fit = style.objectFit;
+    const viewBox = style.getPropertyValue('object-view-box');
+    if (!['fill', 'contain', 'cover', 'none', 'scale-down'].includes(fit) ||
+        (viewBox && viewBox !== 'none') || !['normal', 'none'].includes(style.content)) {
+      unresolved('the image uses unsupported sizing or replacement');
+      return;
+    }
+    const content = clientBounds(el, 'content-box');
+    const scale = scaleFor(el);
+    const width = (content.right - content.left) / scale.x;
+    const height = (content.bottom - content.top) / scale.y;
+    const transform = transformFor(el);
+    const rectangular = (node: Element) => {
+      const style = styleOf(node);
+      const matrix = transformFor(node);
+      return matrix.is2D && Math.abs(matrix.b) < 1e-8 && Math.abs(matrix.c) < 1e-8 &&
+        style.perspective === 'none' && style.rotate.split(' ').length === 1 &&
+        style.clip === 'auto' && style.maskImage === 'none' && style.clipPath === 'none';
+    };
+    let measurable = width > 0 && height > 0;
+    for (let node: Element | null = el; node && measurable; node = parent(node)) measurable = rectangular(node);
+    if (!measurable) {
+      unresolved('image or clip bounds could not be measured as rectangles');
+      return;
+    }
+    const contain = Math.min(width / el.naturalWidth, height / el.naturalHeight);
+    const cover = Math.max(width / el.naturalWidth, height / el.naturalHeight);
+    const factor = fit === 'contain' ? contain : fit === 'cover' ? cover : fit === 'scale-down' ? Math.min(1, contain) : 1;
+    const imageWidth = fit === 'fill' ? width : el.naturalWidth * factor;
+    const imageHeight = fit === 'fill' ? height : el.naturalHeight * factor;
+    // Let the browser normalize keywords and edge offsets to two coordinates.
+    const position = document.createElement('div').style;
+    position.backgroundPosition = style.objectPosition;
+    const offset = (value: string, space: number) => {
+      const simple = /^(-?[\d.]+)(px|%)$/.exec(value);
+      if (simple) return Number(simple[1]) * (simple[2] === '%' ? space / 100 : 1);
+      try {
+        return [...CSSNumericValue.parse(value).toSum('px', 'percent').values].reduce((sum, part) => {
+          const unit = part as CSSUnitValue;
+          return sum + unit.value * (unit.unit === 'percent' ? space / 100 : 1);
+        }, 0);
+      } catch { return NaN; }
+    };
+    const x = offset(position.backgroundPositionX, width - imageWidth);
+    const y = offset(position.backgroundPositionY, height - imageHeight);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      unresolved('object-position could not be measured');
+      return;
+    }
+    const left = content.left + (transform.a < 0 ? width - imageWidth - x : x) * scale.x;
+    const top = content.top + (transform.d < 0 ? height - imageHeight - y : y) * scale.y;
+    const image = { left, top, right: left + imageWidth * scale.x, bottom: top + imageHeight * scale.y };
+    const clips = context.clips.filter(clip => clip.element !== el);
+    // Chromium uses the clip margin for replaced content even for hidden or auto overflow.
+    if (style.overflowX !== style.overflowY) {
+      unresolved('the image uses different overflow modes on each axis');
+      return;
+    }
+    if (style.overflowX !== 'visible' || containsPaint(style))
+      clips.unshift({ element: el, bounds: overflowClipBounds(el), x: true, y: true, overflowX: 'clip', overflowY: 'clip' });
+    for (const clip of clips) {
+      const cut = outside(clip.bounds, image, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y'));
+      if (!cut.length) {
+        const clipStyle = styleOf(clip.element);
+        const radii = [clipStyle.borderTopLeftRadius, clipStyle.borderTopRightRadius,
+          clipStyle.borderBottomRightRadius, clipStyle.borderBottomLeftRadius];
+        const radius = Math.max(...radii.map(Number.parseFloat));
+        if (radii.some(value => value !== '0px')) {
+          const scale = scaleFor(clip.element);
+          const inset = radius + parseFloat(clipStyle.overflowClipMargin.match(/[\d.]+px/)?.[0] ?? '0');
+          const horizontal = image.left >= clip.bounds.left + inset * scale.x && image.right <= clip.bounds.right - inset * scale.x;
+          const vertical = image.top >= clip.bounds.top + inset * scale.y && image.bottom <= clip.bounds.bottom - inset * scale.y;
+          if (radii.some(value => !/^\d+(?:\.\d+)?px$/.test(value)) || !(horizontal || vertical)) {
+            unresolved('rounded image clips need review');
+            return;
+          }
+        }
+        continue;
+      }
+      add('image-framing', el, cut.map(([edge, distance]) => `${edge} crop ${Number((-distance).toFixed(2))}px`).join(', '), expected,
+        'Fit the image within its content box and check the size and overflow of its frame.', clip.element === el ? undefined : clip.element);
+      return;
+    }
+  };
   const clippedRect = (rect: Bounds, clips: Clip[], el: Element, includeSelf: boolean) => {
     const result = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
     for (const clip of clips) {
@@ -554,6 +710,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
     const context = contextFor(el);
+    if (imageSelector && el instanceof HTMLImageElement && el.matches(imageSelector) && !visuallyHidden(el))
+      checkFullImage(el, context);
     // Check the current style so text that appears on focus can still fail.
     const checkClipping = context.clips.length > 0 && !visuallyHidden(el);
     const generated = generatedTextRects(el);

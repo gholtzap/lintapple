@@ -18,8 +18,17 @@ export interface Policy {
   controlContainers: string[];
   contentInsetRules: { selector: string; contentSelector: string; insets: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>> }[];
   iconSizeRules: { selector: string; sizes: number[] }[];
+  fullImageSelectors: string[];
   minLayoutGap: number;
   alignmentRules: { selector: string; itemSelector: string; alignment: 'start' | 'center' | 'end' }[];
+  layoutSeparationRules: {
+    selector: string;
+    before: string;
+    after: string;
+    axis: 'horizontal' | 'vertical';
+    minGap: number;
+    maxGap?: number;
+  }[];
   bannedCopy: string[];
   viewports: { width: number; height: number }[];
   colorSchemes: ('light' | 'dark')[];

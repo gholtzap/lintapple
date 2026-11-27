@@ -129,3 +129,75 @@ test('an already open tooltip is unmeasured instead of a confirmed interaction f
   assert.match(report.runs[0]!.accessibilityCoverage.tooltips!.unmeasured[0]!.reason, /already open/);
   await writeFile(resolve(directory, 'already-open.json'), JSON.stringify(report, null, 2));
 });
+
+test('a visible hover label conflicts with the effective native title under the pointer', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    const asset = (ancestor: string, trigger: string, image: string) => fixture('good')
+      .replace('<button id="trigger"', `<div id="card" ${ancestor}><button id="trigger" ${trigger}`)
+      .replace('>Download</button>', `><img id="thumbnail" ${image} width="24" height="24" alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></button></div>`)
+      .replace('Download review</div>', 'poster-final.png</div>');
+    const cases = [
+      { html: asset('', '', 'title="poster-final.png"'), source: '#thumbnail' },
+      { html: asset('', 'title="poster-final.png"', ''), source: '#trigger' },
+      { html: asset('title="poster-final.png"', '', ''), source: '#card' },
+      { html: asset('title="poster-final.png"', '', 'title=""'), source: null },
+      { html: asset('', '', ''), source: null },
+      { html: asset('', '', 'title="poster-final.png"').replace('aria-describedby="tip"', 'data-ui-tooltip="tip"').replace('role="tooltip" hidden', 'hidden'), source: '#thumbnail' },
+      { html: asset('', '', 'title="poster-final.png"').replace('role="tooltip" hidden', 'hidden'), source: null },
+    ];
+    for (const { html, source } of cases) {
+      await page.goto('about:blank');
+      await page.mouse.move(0, 0);
+      await page.setContent(html);
+      await page.locator('#trigger').focus();
+      assert.ok(await page.locator('#tip').isVisible());
+      assert.equal((await checkPage(page)).findings.some(item => item.rule === 'native-tooltip-conflict'), false);
+      await page.locator('#thumbnail').hover();
+      const report = await checkPage(page, {}, { scope: ['#card'] });
+      const conflicts = report.findings.filter(item => item.rule === 'native-tooltip-conflict');
+      assert.equal(conflicts.length, source ? 1 : 0, source ?? html);
+      if (source) {
+        const conflict = conflicts[0]!;
+        assert.equal(await page.locator(conflict.relatedSelector ?? conflict.selector).getAttribute('id'), source.slice(1));
+        assert.match(conflict.actual, /title="poster-final\.png"/);
+      }
+    }
+  } finally { await browser.close(); }
+});
+
+test('an automatic tooltip scan reports a native title conflict in the hover state', async () => {
+  await mkdir(directory, { recursive: true });
+  const file = resolve(directory, 'native-title-conflict.html');
+  await writeFile(file, fixture('lazy').replace('id="trigger"', 'id="trigger" title="Download review"'));
+  const report = await checkUrl(pathToFileURL(file).href, { viewports: [{ width: 390, height: 844 }], colorSchemes: ['light'] });
+  assert.deepEqual(report.findings.map(({ rule, phase, state }) => ({ rule, phase, state })), [
+    { rule: 'native-tooltip-conflict', phase: 'hover', state: 'automatic tooltips[0]: hover' },
+  ]);
+});
+
+test('native title conflicts use rendered label text', async () => {
+  await mkdir(directory, { recursive: true });
+  const browser = await chromium.launch();
+  const mismatches: { width: number; colorScheme: string; generated: boolean; found: boolean }[] = [];
+  try {
+    for (const width of [390, 1440]) for (const colorScheme of ['light', 'dark'] as const) for (const generated of [true, false]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
+      try {
+        const content = fixture('good').replace('id="trigger"', 'id="trigger" title="Download review"')
+          .replace('Download review</div>', generated ? '</div>' : '<span hidden>Download review</span></div>')
+          .replace('</style>', generated ? '#tip::before{content:"Download review"}</style>' : '</style>');
+        await page.setContent(content);
+        await page.locator('#trigger').hover();
+        await page.locator('#tip').waitFor({ state: 'visible' });
+        if (generated) assert.match(await page.locator('#tip').ariaSnapshot(), /Download review/);
+        const report = await checkPage(page);
+        const found = report.findings.some(f => f.rule === 'native-tooltip-conflict');
+        await writeFile(resolve(directory, `rendered-${width}-${colorScheme}-${generated}.json`), JSON.stringify(report, null, 2));
+        if (found !== generated) mismatches.push({ width, colorScheme, generated, found });
+      } finally { await page.close(); }
+    }
+    assert.deepEqual(mismatches, []);
+  } finally { await browser.close(); }
+});
