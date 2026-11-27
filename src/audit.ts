@@ -7,6 +7,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const rule of policy.controlGapRules) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
   for (const rule of policy.alignmentRules) { document.querySelector(rule.selector); document.querySelector(rule.itemSelector); }
+  for (const selector of policy.fullImageSelectors) document.querySelector(selector);
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
   const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const roots = options?.scope?.map(value => {
@@ -543,6 +544,73 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
   }
   const outside = (bounds: Bounds, rect: Bounds, x: boolean, y: boolean) => Object.entries(edgeInsets(bounds, rect)).filter(([edge, distance]) => distance < -1 && ((edge === 'left' || edge === 'right') ? x : y));
+  const imageSelector = policy.fullImageSelectors.join(', ');
+  const checkFullImage = (el: HTMLImageElement, context: ReturnType<typeof contextFor>) => {
+    const expected = 'the full image inside its frame';
+    const unresolved = (actual: string) => add('image-framing', el, actual, expected, 'Check this image in the tested state.', undefined, { status: 'unresolved' });
+    if (!el.complete || !el.naturalWidth || !el.naturalHeight) {
+      unresolved('image dimensions are unavailable');
+      return;
+    }
+    const style = styleOf(el);
+    const fit = style.objectFit;
+    const viewBox = style.getPropertyValue('object-view-box');
+    if (!['fill', 'contain', 'cover', 'none', 'scale-down'].includes(fit) ||
+        (viewBox && viewBox !== 'none') || !['normal', 'none'].includes(style.content)) {
+      unresolved('the image uses unsupported sizing or replacement');
+      return;
+    }
+    const content = clientBounds(el, 'content-box');
+    const scale = scaleFor(el);
+    const width = (content.right - content.left) / scale.x;
+    const height = (content.bottom - content.top) / scale.y;
+    const transform = transformFor(el);
+    const rectangular = (node: Element) => {
+      const style = styleOf(node);
+      const matrix = transformFor(node);
+      return matrix.is2D && Math.abs(matrix.b) < 1e-8 && Math.abs(matrix.c) < 1e-8 &&
+        style.perspective === 'none' && style.rotate.split(' ').length === 1 &&
+        style.clip === 'auto' && style.maskImage === 'none' && style.clipPath === 'none';
+    };
+    if (!(width > 0 && height > 0) || !context.ancestors.every(rectangular)) {
+      unresolved('image or clip bounds could not be measured as rectangles');
+      return;
+    }
+    const contain = Math.min(width / el.naturalWidth, height / el.naturalHeight);
+    const cover = Math.max(width / el.naturalWidth, height / el.naturalHeight);
+    const factor = fit === 'contain' ? contain : fit === 'cover' ? cover : fit === 'scale-down' ? Math.min(1, contain) : 1;
+    const imageWidth = fit === 'fill' ? width : el.naturalWidth * factor;
+    const imageHeight = fit === 'fill' ? height : el.naturalHeight * factor;
+    // Let the browser normalize keywords and edge offsets to two coordinates.
+    const position = document.createElement('div').style;
+    position.backgroundPosition = style.objectPosition;
+    const offset = (value: string, space: number) => {
+      const simple = /^(-?[\d.]+)(px|%)$/.exec(value);
+      if (simple) return Number(simple[1]) * (simple[2] === '%' ? space / 100 : 1);
+      try {
+        return [...CSSNumericValue.parse(value).toSum('px', 'percent').values].reduce((sum, part) => {
+          const unit = part as CSSUnitValue;
+          return sum + unit.value * (unit.unit === 'percent' ? space / 100 : 1);
+        }, 0);
+      } catch { return NaN; }
+    };
+    const x = offset(position.backgroundPositionX, width - imageWidth);
+    const y = offset(position.backgroundPositionY, height - imageHeight);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      unresolved('object-position could not be measured');
+      return;
+    }
+    const left = content.left + (transform.a < 0 ? width - imageWidth - x : x) * scale.x;
+    const top = content.top + (transform.d < 0 ? height - imageHeight - y : y) * scale.y;
+    const image = { left, top, right: left + imageWidth * scale.x, bottom: top + imageHeight * scale.y };
+    for (const clip of [{ element: el, bounds: content, x: true, y: true }, ...context.clips.filter(clip => clip.element !== el)]) {
+      const cut = outside(clip.bounds, image, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y'));
+      if (!cut.length) continue;
+      add('image-framing', el, cut.map(([edge, distance]) => `${edge} crop ${Number((-distance).toFixed(2))}px`).join(', '), expected,
+        'Fit the image within its content box and check the size and overflow of its frame.', clip.element === el ? undefined : clip.element);
+      return;
+    }
+  };
   const clippedRect = (rect: Bounds, clips: Clip[], el: Element, includeSelf: boolean) => {
     const result = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
     for (const clip of clips) {
@@ -554,6 +622,8 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
     const context = contextFor(el);
+    if (imageSelector && el instanceof HTMLImageElement && el.matches(imageSelector) && !visuallyHidden(el))
+      checkFullImage(el, context);
     // Check the current style so text that appears on focus can still fail.
     const checkClipping = context.clips.length > 0 && !visuallyHidden(el);
     const generated = generatedTextRects(el);

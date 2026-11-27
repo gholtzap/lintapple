@@ -17,7 +17,7 @@ import { svgTextContrast } from './svg-contrast.js';
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'image-framing', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
@@ -80,6 +80,7 @@ export function validatePolicy(input: unknown = {}): Policy {
   }
   positive(policy.minControlInset, 'minControlInset');
   strings(policy.controlContainers, 'controlContainers');
+  strings(policy.fullImageSelectors, 'fullImageSelectors', false);
   if (!Array.isArray(policy.viewports) || !policy.viewports.length) throw new Error('viewports must be a nonempty list.');
   for (const v of policy.viewports) if (!v || Object.keys(v).some(k => !['width', 'height'].includes(k)) || !Number.isInteger(v.width) || !Number.isInteger(v.height) || v.width < 1 || v.height < 1 || v.width > 10000 || v.height > 10000) throw new Error('Each viewport needs integer width and height from 1 to 10000.');
   if (!Array.isArray(policy.colorSchemes) || !policy.colorSchemes.length || [...policy.colorSchemes].some(s => !['light', 'dark'].includes(s))) throw new Error('colorSchemes must contain light or dark.');

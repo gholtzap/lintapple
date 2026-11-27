@@ -15,6 +15,7 @@
   "controlContainers": ["[data-ui-container]"],
   "contentInsetRules": [],
   "iconSizeRules": [],
+  "fullImageSelectors": [],
   "minLayoutGap": 8,
   "alignmentRules": [],
   "bannedCopy": ["unlock your potential", "seamlessly", "game-changing"],

@@ -179,6 +179,24 @@ The check measures element boxes, including borders and transforms. It works wit
 
 An `icon-size` finding includes the measured width and height and the configured sizes. Icon sizes do not change the minimum control hit area. An 18 px icon can sit inside a larger button.
 
+## Check full-image previews
+
+Use `fullImageSelectors` to select visible `img` elements that must show the full image.
+For example, set `"fullImageSelectors": [".asset-preview img"]` in `ui-policy.json`.
+The default list is empty. Leave intentionally cropped thumbnails out of the list.
+
+The check uses the loaded image dimensions, the content box, `object-fit`, and
+`object-position`. It checks for image content outside the content box or a
+rectangular overflow or paint clip on an ancestor. A finding identifies the edge,
+the cut in CSS pixels, and the clipping ancestor when applicable. A cut of 1 px
+or less is within tolerance.
+
+Check the preview after the image loads. Unavailable image dimensions, masks,
+clip paths, and transforms that prevent rectangular measurement produce unresolved
+findings. The check does not measure rounded corners, obstruction by other
+elements, or cropping inside the source artwork. It skips hidden and unmatched
+images. Use a browser assertion if the state must include a particular image.
+
 ## Development
 
 All source, tests, examples, and build scripts use strict TypeScript. Run `npm ci`, then:
