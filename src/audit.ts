@@ -580,7 +580,9 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         style.perspective === 'none' && style.rotate.split(' ').length === 1 &&
         style.clip === 'auto' && style.maskImage === 'none' && style.clipPath === 'none';
     };
-    if (!(width > 0 && height > 0) || !context.ancestors.every(rectangular)) {
+    let measurable = width > 0 && height > 0;
+    for (let node: Element | null = el; node && measurable; node = parent(node)) measurable = rectangular(node);
+    if (!measurable) {
       unresolved('image or clip bounds could not be measured as rectangles');
       return;
     }

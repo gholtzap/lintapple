@@ -68,6 +68,13 @@ test('image framing measures the fitted object and distinguishes unmeasured stat
     assert.equal(broken?.actual, 'image dimensions are unavailable');
     assert.equal(broken?.status, 'unresolved');
 
+    for (const effect of ['mask-image:linear-gradient(transparent,black)', 'clip-path:inset(50%)']) {
+      await page.setContent(fixture(frame, size + 'position:absolute;inset:0;object-fit:contain;')
+        .replace('<img', `<div style="width:100%;height:100%;${effect}"><img`)
+        .replace('</div></html>', '</div></div></html>'));
+      assert.equal((await checkPage(page, policy)).findings.find(item => item.rule === 'image-framing')?.status, 'unresolved', effect);
+    }
+
     const cover = size + 'object-fit: cover; display: inline;';
     await page.setContent(fixture('width: 500px; height: 560px;', cover));
     assert.match((await checkPage(page, policy)).findings.find(item => item.rule === 'image-framing')?.actual ?? '', /top crop/);
