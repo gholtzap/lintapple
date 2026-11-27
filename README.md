@@ -179,6 +179,39 @@ The check measures element boxes, including borders and transforms. It works wit
 
 An `icon-size` finding includes the measured width and height and the configured sizes. Icon sizes do not change the minimum control hit area. An 18 px icon can sit inside a larger button.
 
+## Check the gap between two elements
+
+Use `layoutSeparationRules` to check the order and gap between two parts of
+a component. For example, require the caption to sit below the artwork and
+within 8 px of it:
+
+```json
+{
+  "layoutSeparationRules": [
+    {
+      "selector": ".card",
+      "before": ".artwork",
+      "after": ".caption",
+      "axis": "vertical",
+      "minGap": 0,
+      "maxGap": 8
+    }
+  ]
+}
+```
+
+The default list is empty. Each rule applies to each matching group with
+visible content. Both endpoint selectors must match one distinct visible
+element in the group. Elements in nested matching groups belong to those groups.
+Missing or ambiguous endpoints produce an unresolved finding. Select the parent
+state where both parts are required if a part is intentionally absent in other states.
+
+The check measures the gap between rendered boxes in CSS pixels, from top to
+bottom for `vertical` and in the group's text direction for `horizontal`.
+Overlap or reversed order gives a negative gap. Set `minGap` to zero to allow
+edges to touch. Leave out `maxGap` to check only the minimum. The tolerance is
+0.1 px. Other spacing and alignment checks still apply.
+
 ## Development
 
 All source, tests, examples, and build scripts use strict TypeScript. Run `npm ci`, then:

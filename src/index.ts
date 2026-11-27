@@ -17,7 +17,7 @@ import { svgTextContrast } from './svg-contrast.js';
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-separation', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
@@ -77,6 +77,19 @@ export function validatePolicy(input: unknown = {}): Policy {
         typeof rule.selector !== 'string' || !rule.selector.trim() || typeof rule.itemSelector !== 'string' || !rule.itemSelector.trim() ||
         !['start', 'center', 'end'].includes(rule.alignment))
       throw new Error('Each alignment rule needs a group selector, item selector, and start, center, or end alignment.');
+  }
+  if (!Array.isArray(policy.layoutSeparationRules)) throw new Error('layoutSeparationRules must be a list.');
+  for (const rule of policy.layoutSeparationRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) ||
+        Object.keys(rule).some(key => !['selector', 'before', 'after', 'axis', 'minGap', 'maxGap'].includes(key)) ||
+        [rule.selector, rule.before, rule.after].some(value => typeof value !== 'string' || !value.trim()) ||
+        !['horizontal', 'vertical'].includes(rule.axis)) {
+      throw new Error('Each layout separation rule needs a selector, before and after selectors, and an axis.');
+    }
+    if (!Number.isFinite(rule.minGap) || rule.minGap < 0 ||
+        (rule.maxGap !== undefined && (!Number.isFinite(rule.maxGap) || rule.maxGap < rule.minGap))) {
+      throw new Error('Layout separation gaps must be nonnegative numbers in increasing order.');
+    }
   }
   positive(policy.minControlInset, 'minControlInset');
   strings(policy.controlContainers, 'controlContainers');

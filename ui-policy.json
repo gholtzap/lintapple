@@ -17,6 +17,7 @@
   "iconSizeRules": [],
   "minLayoutGap": 8,
   "alignmentRules": [],
+  "layoutSeparationRules": [],
   "bannedCopy": ["unlock your potential", "seamlessly", "game-changing"],
   "viewports": [{ "width": 390, "height": 844 }, { "width": 1440, "height": 900 }],
   "colorSchemes": ["light"],
