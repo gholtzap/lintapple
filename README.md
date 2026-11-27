@@ -63,6 +63,23 @@ A check with no findings does not prove that omitted frames pass.
 Findings fail the test and attach a JSON report. If a passing page has omitted frames, the helper attaches a coverage report. The helper reads your `ui-policy.json`.
 See the [example tests](examples/playwright/).
 
+### Check part of a page
+
+Pass `scope` to report findings for a component. Each CSS selector must match one visible element in the current document. Add a second selector for a popover or menu rendered in a portal.
+
+```ts
+await expectUI(page, testInfo, undefined, {
+  scope: ['[data-testid="search-trigger"]', '[role="menu"]'],
+  identityAttribute: 'data-testid',
+});
+```
+
+Checks still use the complete document for clipping, spacing, and accessibility context.
+A finding is included when its target or related element is within a scope root. Document-level findings are outside a component scope. The attachment includes the selected roots. Coverage totals and the page size limit still apply to the complete document.
+
+Use the same options as the third argument to `checkPage(page, policy, options)`.
+In this mode, findings include an `elementKey` when the element has a unique ID or a unique value for the configured data attribute. The data attribute takes priority. Keys in open shadow roots also require a unique key for each host. Use keys to compare findings across states. Findings without a key use the positional selector, which can change when siblings move.
+
 ## Mark layout elements
 
 Font, contrast, control size, and screen bounds checks work without extra markup.
@@ -82,6 +99,26 @@ Add these attributes for checks that need layout information:
 
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
+
+### Check existing layout groups
+
+Use `controlGapRules` to set a different minimum gap for a group. Each rule selects the group and sets `minGap` in CSS pixels. For example, a segmented control can use 2 px while other groups keep the default 8 px.
+
+```json
+{ "controlGapRules": [{ "selector": ".segmented-control", "minGap": 2 }] }
+```
+
+Each button belongs to its nearest group selected by a rule or marked with `data-ui-actions`.
+When more than one rule matches a group, the first rule applies. Other groups use `minControlGap`.
+A minimum of 0 allows shared edges. Overlapping buttons still fail.
+
+Use `alignmentRules` to check alignment in existing groups. Each rule selects a group, the items in it, and the horizontal edge or center to compare.
+
+```json
+{ "alignmentRules": [{ "selector": ".project-summary", "itemSelector": ".title, .details", "alignment": "start" }] }
+```
+
+The first rule that matches a group supplies its alignment and item selectors. Nested groups own their items. Groups can still use `data-ui-align` and `data-ui-align-item` without a policy rule.
 
 ## Automatic tooltip checks
 

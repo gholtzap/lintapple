@@ -1,32 +1,69 @@
-import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, RuleId, ContrastData } from './types.js';
+import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, RuleId, ContrastData, PageCheckOptions } from './types.js';
 type Bounds = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>;
 interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
 // Runs in the browser. Use one report shape for all design rules.
-export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
+export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [], options }: AuditInput & { options?: PageCheckOptions }): Promise<Omit<PageReport, 'frameCoverage'>> {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.iconSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
+  for (const rule of policy.controlGapRules) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
+  for (const rule of policy.alignmentRules) { document.querySelector(rule.selector); document.querySelector(rule.itemSelector); }
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
+  const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
+  const roots = options?.scope?.map(value => {
+    const matches = document.querySelectorAll(value);
+    if (matches.length !== 1 || !hasVisibleContent(matches[0]))
+      throw new Error(`Page scope must match one visible element: ${value}`);
+    return matches[0];
+  });
+  const inReportScope = (el: Element): boolean => {
+    if (!roots) return true;
+    for (let node: Element | null = el; node; node = parent(node))
+      if (roots.includes(node)) return true;
+    return false;
+  };
+  const stableKey = (el: Element): string | undefined => {
+    const root = el.getRootNode() as Document | ShadowRoot;
+    const attributes = options?.identityAttribute ? [options.identityAttribute, 'id'] : ['id'];
+    for (const attribute of attributes) {
+      const value = el.getAttribute(attribute);
+      if (!value) continue;
+      const key = `[${attribute}=${CSS.escape(value)}]`;
+      if (root.querySelectorAll(key).length !== 1) continue;
+      if (!(root instanceof ShadowRoot)) return key;
+      const host = stableKey(root.host);
+      if (host) return `${host} >> ${key}`;
+    }
+    return undefined;
+  };
   const findings: Finding[] = [];
   const add: AddFinding = (rule, element, actual, expected, fix, related, details = {}) => {
+    if (!inReportScope(element) && !(related && inReportScope(related))) return;
     const pseudo = details.selector?.match(/::[\w-]+$/)?.[0];
     const exception = policy.exceptions.find(e => e.rules.includes(rule) && (element.matches(e.selector) || !!pseudo && e.selector.endsWith(pseudo) && element.matches(e.selector.slice(0, -pseudo.length))));
     if (exception) { suppressed.push({ rule, selector: selector(element), reason: exception.reason }); return; }
-    findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
+    const elementKey = options?.identityAttribute || roots ? stableKey(element) : undefined;
+    const relatedElementKey = related && (options?.identityAttribute || roots) ? stableKey(related) : undefined;
+    findings.push(format(rule, selector(element), actual, expected, fix, {
+      ...(related ? { relatedSelector: selector(related) } : {}),
+      ...(elementKey ? { elementKey: elementKey + (pseudo ?? '') } : {}),
+      ...(relatedElementKey ? { relatedElementKey } : {}),
+      ...details,
+    }));
   };
   const suppressed: SuppressedFinding[] = [];
-  const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
   const allElements = document.body ? [document.body, ...descendants(document.body)] : [];
   const elements = allElements.filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
-  let controls: Element[];
+  let semanticControls: Element[];
   let dropdownControls: Element[];
   contrast.setup(document);
   try {
-    controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
+    semanticControls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
     dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
+  const controls = semanticControls.filter(el => !visuallyHidden(el));
   const loadedImages = new Set<Element>();
   await Promise.all(elements.filter(el => el.matches('input[type="image"][src]')).map(async el => {
     const image = new Image();
@@ -142,10 +179,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   }
   const groups = new Map<Node, Element[]>();
+  const actionGroups = ['[data-ui-actions]', ...policy.controlGapRules.map(rule => rule.selector)].join(', ');
   for (const el of controls) {
-    const parent = el.closest('[data-ui-actions]') ?? el.parentElement ?? el.getRootNode();
-    const list = groups.get(parent) ?? [];
-    list.push(el); groups.set(parent, list);
+    const group = el.closest(actionGroups) ?? el.parentElement ?? el.getRootNode();
+    const list = groups.get(group) ?? [];
+    list.push(el); groups.set(group, list);
   }
   // Use the same geometry for control groups and component stacks.
   const checkGap = (group: Element[], rule: RuleId, minimum: number) => {
@@ -158,17 +196,24 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         add(rule, group[i], `${Number(gap.toFixed(2))}px`, `a gap of at least ${minimum}px`, 'Use a layout group with an approved gap. Check for overlap.', group[j]);
     }
   };
-  for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
+  for (const [owner, group] of groups) {
+    const rule = owner instanceof Element ? policy.controlGapRules.find(rule => owner.matches(rule.selector)) : undefined;
+    checkGap(group, 'control-gap', rule?.minGap ?? policy.minControlGap);
+  }
   const layoutChildren = (el: Element): Element[] => [...el.children].flatMap(child =>
     getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
   for (const el of allElements.filter(el => el.matches('[data-ui-stack]')).filter(hasVisibleContent))
     checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
   let alignmentGroups = 0;
-  for (const group of allElements.filter(el => el.matches('[data-ui-align]')).filter(hasVisibleContent)) {
-    const alignment = group.getAttribute('data-ui-align');
-    const items = [...group.querySelectorAll('[data-ui-align-item]')].filter(el => el.closest('[data-ui-align]') === group);
+  const alignments = ['[data-ui-align]', ...policy.alignmentRules.map(rule => rule.selector)].join(', ');
+  for (const group of allElements.filter(el => el.matches(alignments)).filter(hasVisibleContent)) {
+    const rule = policy.alignmentRules.find(rule => group.matches(rule.selector));
+    const alignment = rule?.alignment ?? group.getAttribute('data-ui-align');
+    const items = [...group.querySelectorAll(rule?.itemSelector ?? '[data-ui-align-item]')]
+      .filter(el => el.closest(alignments) === group);
     if (!['start', 'center', 'end'].includes(alignment ?? '') || items.length < 2) {
-      add('layout-alignment', group, `${alignment || 'empty alignment'} with ${items.length} marked items`, 'start, center, or end alignment with at least two marked items', 'Set data-ui-align and mark the elements that must align with data-ui-align-item.');
+      add('layout-alignment', group, `${alignment || 'empty alignment'} with ${items.length} marked items`, 'start, center, or end alignment with at least two marked items',
+        rule ? 'Select at least two items in the alignment rule.' : 'Set data-ui-align and mark the elements that must align with data-ui-align-item.');
       continue;
     }
     const targets = items.filter(visible);
@@ -282,7 +327,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   };
   const controlContentCoverage: PageReport['controlContentCoverage'] = { checked: 0, unmeasured: [] };
-  const contentControls = new Set([...controls, ...dropdownControls]);
+  const contentControls = new Set([...controls, ...dropdownControls.filter(el => !visuallyHidden(el))]);
   for (const container of elements) {
     const rule = policy.contentInsetRules.find(rule => container.matches(rule.selector));
     let customContent = 0;
@@ -638,16 +683,38 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         if (ratio < required) reportContrast(el, 'failed', { ...data, contrastRatio: Math.floor(ratio * 100) / 100, fgColor: blended.toHexString(), bgColor: background.toHexString() });
       } catch (error) { reportContrast(el, 'unresolved', data, `boxless text calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
+    const coversPlaceholder = (node: Element, style: CSSStyleDeclaration, content: Bounds) => {
+      if (!(node instanceof HTMLElement) || node.getClientRects().length !== 1 ||
+          style.backgroundImage !== 'none' || style.clipPath !== 'none' ||
+          style.maskImage !== 'none' || !['border-box', 'padding-box', 'content-box'].includes(style.backgroundClip)) return false;
+      const transform = transformFor(node);
+      if (transform.b !== 0 || transform.c !== 0 || transform.a <= 0 || transform.d <= 0) return false;
+      const corners = [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius];
+      if (corners.some(radius => !/^\d+(?:\.\d+)?px$/.test(radius))) return false;
+      const radius = Math.max(...corners.map(Number.parseFloat));
+      // The middle strips of a rounded box are opaque even when its corners are not.
+      const box = style.backgroundClip as 'border-box' | 'padding-box' | 'content-box';
+      const fits = (bounds: Bounds) => Object.values(edgeInsets(bounds, content)).every(distance => distance >= 0);
+      if (!fits(clientBounds(node, box, [0, radius, 0, radius])) &&
+          !fits(clientBounds(node, box, [radius, 0, radius, 0]))) return false;
+      try { return new contrast.commons.color.Color().parseString(style.backgroundColor).alpha === 1; }
+      catch { return false; }
+    };
     for (const el of elements.filter(el => el.matches('input:placeholder-shown, textarea:placeholder-shown') && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'))) {
       const style = placeholderStyle(el);
       if (!style) continue;
       const size = parseFloat(style.fontSize), bold = parseFloat(style.fontWeight) >= 700;
       const required = size >= 24 || (bold && size >= 56 / 3) ? 3 : 4.5;
       const data = { expectedContrastRatio: `${required}:1` };
-      let unsupported = false;
+      let unsupported = false, opaqueBackdrop = false;
+      const content = clientBounds(el, 'content-box');
       for (let node: Element | null = el; node; node = parent(node)) {
         const nodeStyle = getComputedStyle(node);
-        if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
+        if (!opaqueBackdrop) {
+          if (nodeStyle.backdropFilter !== 'none') unsupported = true;
+          opaqueBackdrop = coversPlaceholder(node, nodeStyle, content);
+        }
+        if ((nodeStyle.display !== 'contents' && (parseFloat(nodeStyle.opacity) !== 1 || nodeStyle.maskImage !== 'none')) || nodeStyle.filter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
       }
       if (unsupported || parseFloat(style.webkitTextStrokeWidth) > 0 || style.textShadow !== 'none' || style.filter !== 'none' || style.mixBlendMode !== 'normal') {
         reportContrast(el, 'unresolved', data, 'placeholder opacity, strokes, filters, blend modes, or text shadows need review');
@@ -665,6 +732,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       } catch (error) { reportContrast(el, 'unresolved', data, `placeholder calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
   } finally { contrast.teardown(); }
-  const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
-  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+  const accessibilityCoverage = await accessibility({ elements, controls: semanticControls, visible, hasVisibleContent, parent, add, engine: contrast });
+  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: semanticControls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }
