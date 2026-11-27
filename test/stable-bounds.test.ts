@@ -49,6 +49,39 @@ test('stable bounds report growth, movement, and disappearing elements', async (
   } finally { await browser.close(); }
 });
 
+test('stable bounds time out when a font stalls before or after the action', { timeout: 8000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.LINTAPPLE_BROWSER_CHANNEL || undefined });
+  t.after(() => browser.close());
+
+  const state = { ...plan.states![0], stableBounds: [{ selector: '#count' }] };
+  for (const phase of ['before', 'after']) {
+    const page = await browser.newPage();
+    try {
+      // Hold the request open until the page closes.
+      await page.route('https://example.test/stalled.woff2', () => {});
+      await page.setContent(html(`
+        @font-face { font-family: Stalled; src: url(https://example.test/stalled.woff2); }
+      `, `
+        <span id="count">9</span><button id="increase">Increase</button>
+        <script>
+          const startFont = () => document.fonts.load('16px Stalled').catch(() => {});
+          document.querySelector('#increase').onclick = () => {
+            if (${phase === 'after'}) startFont();
+            document.querySelector('#count').textContent = '10';
+          };
+          if (${phase === 'before'}) startFont();
+        </script>
+      `), { waitUntil: 'domcontentloaded' });
+
+      await assert.rejects(checkInteractions(page, { timeout: 500, states: [state] }), {
+        message: `State "Increase revision count" could not be checked: Timeout waiting for fonts and layout ${phase} the action.`,
+      });
+      assert.equal(await page.evaluate(() => document.fonts.status), 'loading');
+      assert.equal(await page.locator('#count').textContent(), phase === 'before' ? '9' : '10');
+    } finally { await page.close(); }
+  }
+});
+
 test('stable bounds validates measurements before a named action can run', () => {
   const state = plan.states![0];
   for (const stableBounds of [[], [{ selector: '#count', tolerance: -1 }], [{ selector: '#count', properties: ['left'] }],
