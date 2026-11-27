@@ -36,16 +36,6 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
     for (const rule of results) for (const node of rule.nodes) {
       const el = node.element;
       if (!scope.has(el) || !visible(el)) continue;
-      // Resolve only the engine's popup-reference uncertainty with unique DOM targets.
-      if (status === 'unresolved' && rule.id === 'aria-valid-attr-value') {
-        const checks = [...node.any, ...node.all, ...node.none];
-        const ids = (el.getAttribute('aria-controls') || '').trim().split(/\s+/).filter(Boolean);
-        const resolved = ['true', 'menu'].includes(el.getAttribute('aria-haspopup') ?? '') && ids.length && ids.every(id => {
-          const targets = (el.getRootNode() as Document | ShadowRoot).querySelectorAll(`#${CSS.escape(id)}`);
-          return targets.length === 1 && targets[0].getAttribute('role') === 'menu';
-        });
-        if (resolved && checks.length && checks.every(check => check.id === 'aria-valid-attr-value' && check.data?.messageKey === 'controlsWithinPopup')) continue;
-      }
       const id = rules[rule.id];
       if (id === 'form-label' && ariaHidden(el)) continue;
       const key = `${id}:${elements.indexOf(el)}`;
@@ -80,6 +70,17 @@ export async function auditAccessibility({ elements, controls, visible, hasVisib
       if (!ariaHidden(el) && el.matches('input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]), textarea, select')) {
         const named = el.getAttribute('aria-label')?.trim() || refs(el).some(ref => ref && labelText(ref)) || [...((el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).labels || [])].some(label => hasLabelText(label, el));
         if (!named && !reported.has(`form-label:${elements.indexOf(el)}`)) add('form-label', el, 'no label beyond a placeholder or title', 'a programmatic form label', 'Use a label element, aria-label, or aria-labelledby. Keep placeholders as examples.', null, { status: 'failed', category: 'accessibility' });
+      }
+      // A referenced popup must resolve to one menu in the control's own root.
+      if (!ariaHidden(el) && ['true', 'menu'].includes(el.getAttribute('aria-haspopup') ?? '') &&
+          el.hasAttribute('aria-controls') && !reported.has(`control-state:${elements.indexOf(el)}`)) {
+        const ids = (el.getAttribute('aria-controls') || '').trim().split(/\s+/).filter(Boolean);
+        const validMenu = ids.length > 0 && ids.every(id => {
+          const targets = (el.getRootNode() as Document | ShadowRoot).querySelectorAll(`#${CSS.escape(id)}`);
+          return targets.length === 1 && targets[0].getAttribute('role') === 'menu';
+        });
+        if (!validMenu) add('control-state', el, `aria-controls="${el.getAttribute('aria-controls')}" needs popup review`, 'a unique controlled menu',
+          'Open the menu and check its role and reference.', null, { status: 'unresolved', category: 'accessibility' });
       }
       if (el.matches('[data-ui-disclosure], button[aria-haspopup="menu"], button[aria-haspopup="true"], [role="button"][aria-haspopup="menu"], [role="button"][aria-haspopup="true"]')) {
         if (!['true', 'false'].includes(el.getAttribute('aria-expanded') ?? '')) add('control-state', el, 'missing or invalid aria-expanded', 'aria-expanded="true" or "false"', 'Expose the current expanded state and update it when the panel changes.', null, { status: 'failed', category: 'accessibility' });
