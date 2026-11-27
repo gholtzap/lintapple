@@ -20,13 +20,14 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
-  let controls: Element[];
+  let semanticControls: Element[];
   let dropdownControls: Element[];
   contrast.setup(document);
   try {
-    controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
+    semanticControls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
     dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
+  const controls = semanticControls.filter(el => !visuallyHidden(el));
   const loadedImages = new Set<Element>();
   await Promise.all(elements.filter(el => el.matches('input[type="image"][src]')).map(async el => {
     const image = new Image();
@@ -282,7 +283,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   };
   const controlContentCoverage: PageReport['controlContentCoverage'] = { checked: 0, unmeasured: [] };
-  const contentControls = new Set([...controls, ...dropdownControls]);
+  const contentControls = new Set([...controls, ...dropdownControls.filter(el => !visuallyHidden(el))]);
   for (const container of elements) {
     const rule = policy.contentInsetRules.find(rule => container.matches(rule.selector));
     let customContent = 0;
@@ -687,6 +688,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       } catch (error) { reportContrast(el, 'unresolved', data, `placeholder calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
   } finally { contrast.teardown(); }
-  const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
-  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+  const accessibilityCoverage = await accessibility({ elements, controls: semanticControls, visible, hasVisibleContent, parent, add, engine: contrast });
+  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: semanticControls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }
