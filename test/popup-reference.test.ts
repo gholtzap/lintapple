@@ -26,3 +26,28 @@ test('popup reference review is resolved only for unique menu targets', async ()
     assert.ok((await checkPage(page)).findings.some(f => f.rule === 'control-state' && f.status === 'failed'));
   } finally { await browser.close(); }
 });
+
+test('popup review resolves menu references within the control shadow root', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<html lang="en"><style>html{background:white;font:16px system-ui}</style><body><div id="menu" role="menu"><button role="menuitem">Save</button></div><div id="host"></div></body></html>');
+    await page.locator('#host').evaluate(host => {
+      host.attachShadow({ mode: 'open' }).innerHTML = '<button aria-haspopup="menu" aria-expanded="true" aria-controls="menu">Actions</button><div id="menu">Unrelated content</div>';
+    });
+    assert.ok((await checkPage(page)).findings.some(f => f.rule === 'control-state' && f.status === 'unresolved'));
+    await page.locator('#host').evaluate(host => {
+      host.shadowRoot!.getElementById('menu')!.outerHTML = '<div id="menu" role="menu"><button role="menuitem">Save</button></div>';
+    });
+    assert.deepEqual((await checkPage(page)).findings.filter(f => f.rule === 'control-state'), []);
+  } finally { await browser.close(); }
+});
+
+test('popup review excludes controls hidden from the accessibility tree', async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<html lang="en"><style>html{background:white;font:16px system-ui}</style><body><button aria-hidden="true" tabindex="-1" aria-haspopup="menu" aria-expanded="true" aria-controls="menu">Actions</button><div id="menu">Unrelated content</div></body></html>');
+    assert.deepEqual((await checkPage(page)).findings.filter(f => f.rule === 'control-state'), []);
+  } finally { await browser.close(); }
+});

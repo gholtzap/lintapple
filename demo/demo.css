@@ -18,7 +18,7 @@ button:hover { background: var(--ui-background); }
 .icon-button { display: grid; place-items: center; width: 32px; min-width: 32px; min-height: 32px; padding: 6px; border: 0; background: transparent; }
 svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 .github-icon { fill: currentColor; stroke: none; }
-.sidebar { position: fixed; top: 96px; left: 32px; bottom: 40px; width: 176px; overflow-y: auto; font-size: 12px; }
+.sidebar { background: var(--ui-background); position: fixed; top: 96px; left: 32px; bottom: 40px; width: 176px; overflow-y: auto; font-size: 12px; }
 .sidebar nav { gap: 24px; }
 .nav-group { gap: 8px; }
 .nav-group p { font-weight: 500; }
