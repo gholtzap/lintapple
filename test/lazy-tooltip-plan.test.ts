@@ -38,6 +38,7 @@ const fixture = (mode: string) => html(`
       if (event.key === 'Escape') {
         if (mode === 'persistent') trigger.removeAttribute('aria-describedby');
         else if (mode === 'replaced') { close(); open(); }
+        else if (mode === 'orphan') { const ghost = tip.cloneNode(true); close(); ghost.id = 'orphan'; document.body.append(ghost); }
         else close();
       }
     });
@@ -52,7 +53,7 @@ test('trigger-only plans check the link on each opening and the tooltip on Escap
   const browser = await chromium.launch({ channel: process.env.LINTAPPLE_BROWSER_CHANNEL || undefined });
   try {
     for (const [mode, expected] of [['good', null], ['hoverable', null], ['absent', 'hover'], ['unlinked', 'tooltip-link'],
-      ['hover-only', 'focus'], ['persistent', 'escape'], ['replaced', 'escape']] as const) {
+      ['hover-only', 'focus'], ['persistent', 'escape'], ['replaced', 'escape'], ['orphan', 'escape']] as const) {
       const page = await browser.newPage({ viewport: screen });
       await page.setContent(fixture(mode));
       const baseline = await checkPage(page);

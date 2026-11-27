@@ -278,12 +278,22 @@ export async function runInteractions(page: Page, input: Partial<InteractionPlan
     await record('icon-button-tooltip', item.trigger, Boolean(focusTip), reset ? 'tooltip did not appear on keyboard focus' : 'hover tooltip did not reset before the focus check', 'a text tooltip on keyboard focus', 'Show the tooltip for keyboard focus and clear its hover state.', { phase: 'focus', ...(!reset || !reachable ? { status: 'unresolved' } : {}) });
     await inspect(`tooltips[${index}]: keyboard focus`);
     if (focusTip) {
-      await page.keyboard.press('Escape');
-      const dismissed = await hidden(focusTip) &&
-        (item.tooltip !== undefined || !await getLinkedTooltip(item.trigger, false));
-      await record('icon-button-tooltip', item.trigger, dismissed, 'tooltip remained visible after Escape', 'Escape to dismiss the tooltip', 'Close the tooltip on Escape without moving focus.', { phase: 'escape' });
-      await record('keyboard-operation', item.trigger, await focused(trigger), 'Escape moved focus away from the tooltip trigger', 'focus to stay on the tooltip trigger', 'Dismiss the tooltip without moving focus.', { phase: 'tooltip-escape-focus' });
-      await inspect(`tooltips[${index}]: Escape`);
+      const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
+      try {
+        const beforeEscape = await page.evaluateHandle(visibility =>
+          [...document.querySelectorAll('[role="tooltip"]')].filter(visibility.hasVisibleContent), visibility);
+        try {
+          await page.keyboard.press('Escape');
+          const dismissed = await hidden(focusTip) &&
+            (item.tooltip !== undefined || !await getLinkedTooltip(item.trigger, false));
+          const replacement = item.tooltip === undefined && await page.evaluate(({ before, visibility }) =>
+            [...document.querySelectorAll('[role="tooltip"]')].some(el => !before.includes(el) && visibility.hasVisibleContent(el)),
+          { before: beforeEscape, visibility });
+          await record('icon-button-tooltip', item.trigger, dismissed && !replacement, 'tooltip remained visible after Escape', 'Escape to dismiss the tooltip', 'Close the tooltip on Escape without moving focus.', { phase: 'escape' });
+          await record('keyboard-operation', item.trigger, await focused(trigger), 'Escape moved focus away from the tooltip trigger', 'focus to stay on the tooltip trigger', 'Dismiss the tooltip without moving focus.', { phase: 'tooltip-escape-focus' });
+          await inspect(`tooltips[${index}]: Escape`);
+        } finally { await beforeEscape.dispose(); }
+      } finally { await visibility.dispose(); }
     }
     await trigger.evaluate(el => (el as HTMLElement).blur());
   }
