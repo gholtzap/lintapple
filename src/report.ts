@@ -25,7 +25,7 @@ export function summarizeFindings(findings: readonly (Finding & { viewport?: Pol
   return { occurrences: findings.length, problems: groups.size, failed: findings.length - unresolved, unresolved, byRule: [...byRule.values()], groups: [...groups.values()] };
 }
 
-const terminalText = (value: string) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+export const terminalText = (value: string) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
 export function formatSummary(summary: FindingSummary): string {
   const unique = (values: (string | undefined)[]) => [...new Set(values.filter((value): value is string => value !== undefined))].join(', ');

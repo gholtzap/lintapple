@@ -1,0 +1,15 @@
+{
+  "name": "lintapple-source-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "lintapple source src/good.tsx",
+    "check:bad": "lintapple source src/bad.tsx"
+  },
+  "devDependencies": {
+    "@shadcn/lint": "0.2.5",
+    "@typescript-eslint/parser": "8.74.0",
+    "eslint": "9.39.5",
+    "vue-eslint-parser": "10.4.1"
+  }
+}
