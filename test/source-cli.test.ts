@@ -31,12 +31,17 @@ test('installed source command checks real design rules and reports incomplete c
     await execute('npm', ['install', '--no-audit', '--no-fund', join(cwd, packed[0].filename)], { cwd });
     cli = join(cwd, 'node_modules/lintapple/dist/bin/lintapple.js');
     const defaults: SourceReport = JSON.parse((await run(['source', '--json'], 1)).stdout);
-    assert.equal(defaults.files.length, 2);
+    assert.equal(defaults.files.length, 5);
     assert.ok(defaults.skipped.some(file => file.path === 'eslint.config.mjs'));
     const before = await readFile(join(cwd, 'src/bad.tsx'), 'utf8');
     const config = await readFile(join(cwd, 'eslint.config.mjs'), 'utf8');
     const bad: SourceReport = JSON.parse((await run(['source', 'src/bad.tsx', '--json'], 1)).stdout);
     assert.equal(bad.status, 'failed');
+    assert.equal(bad.engine.designPlugin.version, '0.2.5');
+    assert.equal(bad.files[0].theme, 'src/theme.css');
+    assert.equal(bad.files[0].config, 'eslint.config.mjs');
+    assert.deepEqual(bad.diagnostics, []);
+    assert.match((await run(['source', 'src/bad.tsx'], 1)).stdout, /Suggestions need a browser check/);
     assert.equal(bad.files.length, 1);
     assert.equal(bad.files[0].rules.length, 3);
     assert.ok(bad.findings.some(f => f.ruleId === 'shadcn/no-raw-colors'));
@@ -48,6 +53,34 @@ test('installed source command checks real design rules and reports incomplete c
     assert.deepEqual(good.findings, []);
     assert.equal(await readFile(join(cwd, 'src/bad.tsx'), 'utf8'), before);
     assert.equal(await readFile(join(cwd, 'eslint.config.mjs'), 'utf8'), config);
+    // Both parsers enforce the same component contract through the installed CLI.
+    const vue: SourceReport = JSON.parse((await run(['source', 'src/bad.vue', '--json'], 1)).stdout);
+    assert.ok(vue.findings.some(f => f.ruleId === 'shadcn/no-restyle' && f.message.includes('px-8')));
+    await run(['source', 'src/good.vue'], 0);
+    // Select the app's entry point even when another stylesheet has more tokens.
+    await writeFile(join(cwd, 'components.json'), JSON.stringify({ tailwind: { css: 'src/theme.css' }, aliases: { ui: './src/ui' } }));
+    await writeFile(join(cwd, 'src/other.css'), '@import "tailwindcss"; @theme { --color-other: red; --color-another: blue; }');
+    const selected: SourceReport = JSON.parse((await run(['source', 'src/good.tsx', '--json'], 0)).stdout);
+    assert.equal(selected.files[0].theme, 'src/theme.css');
+    // Upstream fallback warnings must be visible in JSON and must not pass.
+    await writeFile(join(cwd, 'components.json'), JSON.stringify({ tailwind: { css: 'missing.css' }, aliases: { ui: './src/ui' } }));
+    const missingTheme: SourceReport = JSON.parse((await run(['source', 'src/good.tsx', '--json'], 2)).stdout);
+    assert.equal(missingTheme.status, 'incomplete');
+    assert.ok(missingTheme.diagnostics.some(message => message.includes('missing.css')));
+    await rm(join(cwd, 'components.json'));
+    await rm(join(cwd, 'src/other.css'));
+    await rm(join(cwd, 'src/theme.css'));
+    const noTheme: SourceReport = JSON.parse((await run(['source', 'src/good.tsx', '--json'], 2)).stdout);
+    assert.ok(noTheme.errors.some(message => message.includes('No theme')));
+    await writeFile(join(cwd, 'src/theme.css'), '@import "tailwindcss"; @theme { --color-primary: #21201c; }');
+    const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+    if (nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 13)) {
+      await execute('npm', ['install', '--no-save', '--no-audit', '--no-fund', 'eslint@10.15.0'], { cwd });
+      const newer: SourceReport = JSON.parse((await run(['source', 'src/bad.tsx', '--json'], 1)).stdout);
+      assert.equal(newer.engine.version, '10.15.0');
+      assert.equal(newer.findings.length, bad.findings.length);
+      await run(['source', 'src/bad.vue'], 1);
+    }
     await execute('npm', ['install', '--no-save', '--no-audit', '--no-fund', 'eslint@9.39.5'], { cwd });
     const older: SourceReport = JSON.parse((await run(['source', 'src/bad.tsx', '--json'], 1)).stdout);
     assert.equal(older.engine.version, '9.39.5');

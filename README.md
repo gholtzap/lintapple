@@ -63,7 +63,7 @@ For your own React and Tailwind v4 project, install the source tools:
 npm install -D eslint @shadcn/lint @typescript-eslint/parser
 ```
 
-Use ESLint 9.30 or later in major version 9 or 10. Each tool's Node.js requirements also apply. The example uses ESLint 10, which requires Node.js 22.13 or later on the Node.js 22 release line.
+Use ESLint 9.30 or later in major version 9 or 10. Each tool's Node.js requirements also apply. The examples use ESLint 9 to support Node.js 22.0. ESLint 10 requires Node.js 22.13 or later on that release line.
 
 Add the following block to your existing ESLint flat configuration. If you have no configuration, save it as `eslint.config.mjs`. Keep your existing parser setup if it already supports TSX.
 
@@ -97,11 +97,45 @@ Paths default to the current directory. Quote globs so ESLint can expand them. `
 
 Only rules registered under `shadcn/*` run. Other ESLint rules still need your normal lint command. The source tools are optional and are not installed by Lintapple. Use [shadcn/lint's configuration guide](https://github.com/shadcn-ui/lint#settings) to connect your theme and components, or enable component rules such as `no-restyle`.
 
-Text output lists checked files and their enabled rules, findings with file locations, and files without design checks. JSON output keeps ESLint messages and suggestions, plus `files`, `skipped`, `errors`, and `status`. Suggestions are not applied. ESLint ignores and inline suppressions apply.
+Set `tailwind.css` in your project's `components.json` when the app has more than one CSS entry point. Use its existing component alias. For example:
+
+```json
+{
+  "tailwind": { "css": "src/app/globals.css" },
+  "aliases": { "ui": "@/components/ui" }
+}
+```
+
+The alias must resolve through the project's TypeScript paths or package exports. For theme packages such as Kumo, add `settings: { shadcn: { themeImports: ['^@cloudflare/kumo/'] } }` to the ESLint block. Relative theme imports are read by the source engine. Lintapple uses the engine's public project API to report the selected theme; it does not implement theme discovery.
+
+Text and JSON reports list checked files, enabled rules, the ESLint config, selected theme, and engine and plugin versions. They also list files without design checks. JSON keeps native ESLint messages and suggestions and includes `diagnostics`, `errors`, and `status`. Upstream setup warnings produce an incomplete result. Missing themes produce an incomplete result for token rules.
+
+Suggestions are unverified and are never applied. Check the result in the browser before accepting a replacement. For example, replacing `text-[14px]` with `text-product-body` can change line height. A `rem` value also depends on the app's root font size. ESLint ignores and inline suppressions apply.
 
 Exit codes: `0` means the enabled rules passed on the listed files; `1` means findings, including warnings; `2` means the check could not finish. Parser errors, missing setup, and a scan with no files that have design rules are not passes. Files listed as skipped have no design-check coverage. Configuration and startup errors go to stderr, including with `--json`.
 
-This first version supports ESLint with `@shadcn/lint`. The example checks TSX; standalone CSS files are not checked. It does not check component replacement or component count limits. It does not check layout, contrast, or browser behavior. Run the URL command or your Playwright checks for those checks.
+For Vue, use the existing `vue-eslint-parser` setup and enable the component rule in ESLint:
+
+```sh
+npm install -D vue-eslint-parser
+```
+
+```js
+import vueParser from 'vue-eslint-parser';
+
+// Add this block to the configuration above.
+{
+  files: ['**/*.vue'],
+  languageOptions: { parser: vueParser, parserOptions: { parser: tsParser } },
+  plugins: { shadcn },
+  settings: { shadcn: { componentImports: ['^@/components/ui/'] } },
+  rules: { 'shadcn/no-restyle': ['error', { allow: ['layout'] }] },
+}
+```
+
+With this rule, `<Button size="sm" class="px-8">Save</Button>` reports a padding override. `<Button size="sm">Save</Button>` passes. The runnable Vue pair is in `examples/source/src/{bad,good}.vue`. Run `lintapple source src/bad.vue` from the example directory. React and Vue use the same command; their ESLint parsers own the syntax. See the [upstream Vue guide](https://github.com/shadcn-ui/lint/blob/main/docs/vue.md) for auto-imports and wrapper support.
+
+This version is verified with React/TSX and Vue templates, Tailwind v4, `@shadcn/lint` 0.2.5, and ESLint 9.39.5 and 10.15.0. Other parsers are not yet verified. Standalone CSS, CSS modules, and Vue style blocks are not checked. It does not check component replacement or component count limits. It does not check layout, contrast, or browser behavior. Run the URL command or your Playwright checks for those checks.
 
 ## Use in Playwright
 
