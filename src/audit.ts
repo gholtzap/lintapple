@@ -1,43 +1,116 @@
-import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, RuleId, ContrastData } from './types.js';
+import type { AuditInput, PageReport, Finding, SuppressedFinding, AddFinding, RuleId, ContrastData, PageCheckOptions } from './types.js';
 type Bounds = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>;
 interface Clip { element: Element; bounds: Bounds; x: boolean; y: boolean }
 // Runs in the browser. Use one report shape for all design rules.
-export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [] }: AuditInput): Promise<Omit<PageReport, 'frameCoverage'>> {
+export async function audit({ policy, contrast, accessibility, format, visibility, svgContrast = [], options }: AuditInput & { options?: PageCheckOptions }): Promise<Omit<PageReport, 'frameCoverage'>> {
   for (const rule of [...policy.typeRules, ...policy.controlSizeRules, ...policy.iconSizeRules, ...policy.exceptions]) document.querySelector(rule.selector);
+  for (const rule of policy.controlGapRules) document.querySelector(rule.selector);
   for (const container of policy.controlContainers) document.querySelector(container);
+  for (const rule of policy.alignmentRules) { document.querySelector(rule.selector); document.querySelector(rule.itemSelector); }
+  for (const selector of policy.fullImageSelectors) document.querySelector(selector);
   for (const rule of policy.contentInsetRules) { document.querySelector(rule.selector); document.querySelector(rule.contentSelector); }
-  const findings: Finding[] = [];
-  const selector = (element: Element) => {
-    const parts: string[] = [];
-    for (let node: Element | null = element; node; node = node.parentElement) {
-      const tag = node.tagName.toLowerCase();
-      if (node === document.documentElement) { parts.unshift(tag); break; }
-      const siblings = [...node.parentElement!.children].filter(s => s.tagName === node.tagName);
-      parts.unshift(`${tag}:nth-of-type(${siblings.indexOf(node) + 1})`);
-    }
-    return parts.join(' > ');
+  for (const rule of policy.layoutSeparationRules) {
+    document.querySelector(rule.selector);
+    document.querySelector(rule.before);
+    document.querySelector(rule.after);
+  }
+  const { visuallyHidden, parent, descendants, selector, resolveSelector, textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
+  const roots = options?.scope?.map(value => {
+    const matches = document.querySelectorAll(value);
+    if (matches.length !== 1 || !hasVisibleContent(matches[0]))
+      throw new Error(`Page scope must match one visible element: ${value}`);
+    return matches[0];
+  });
+  const inReportScope = (el: Element): boolean => {
+    if (!roots) return true;
+    for (let node: Element | null = el; node; node = parent(node))
+      if (roots.includes(node)) return true;
+    return false;
   };
+  const stableKey = (el: Element): string | undefined => {
+    const root = el.getRootNode() as Document | ShadowRoot;
+    const attributes = options?.identityAttribute ? [options.identityAttribute, 'id'] : ['id'];
+    for (const attribute of attributes) {
+      const value = el.getAttribute(attribute);
+      if (!value) continue;
+      const key = `[${attribute}=${CSS.escape(value)}]`;
+      if (root.querySelectorAll(key).length !== 1) continue;
+      if (!(root instanceof ShadowRoot)) return key;
+      const host = stableKey(root.host);
+      if (host) return `${host} >> ${key}`;
+    }
+    return undefined;
+  };
+  const findings: Finding[] = [];
   const add: AddFinding = (rule, element, actual, expected, fix, related, details = {}) => {
+    if (!inReportScope(element) && !(related && inReportScope(related))) return;
     const pseudo = details.selector?.match(/::[\w-]+$/)?.[0];
     const exception = policy.exceptions.find(e => e.rules.includes(rule) && (element.matches(e.selector) || !!pseudo && e.selector.endsWith(pseudo) && element.matches(e.selector.slice(0, -pseudo.length))));
     if (exception) { suppressed.push({ rule, selector: selector(element), reason: exception.reason }); return; }
-    findings.push(format(rule, selector(element), actual, expected, fix, { ...(related ? { relatedSelector: selector(related) } : {}), ...details }));
+    const elementKey = options?.identityAttribute || roots ? stableKey(element) : undefined;
+    const relatedElementKey = related && (options?.identityAttribute || roots) ? stableKey(related) : undefined;
+    findings.push(format(rule, selector(element), actual, expected, fix, {
+      ...(related ? { relatedSelector: selector(related) } : {}),
+      ...(elementKey ? { elementKey: elementKey + (pseudo ?? '') } : {}),
+      ...(relatedElementKey ? { relatedElementKey } : {}),
+      ...details,
+    }));
   };
   const suppressed: SuppressedFinding[] = [];
-  const { textRects, generatedTextRects, visible, hasVisibleContent, generatedTextStyles } = visibility;
-  const elements = [...document.querySelectorAll('body, body *')].filter(visible);
+  const allElements = document.body ? [document.body, ...descendants(document.body)] : [];
+  const elements = allElements.filter(visible);
   if (!elements.length) throw new Error('Page has no visible body. Wait for the interface before checking it.');
   if (elements.length > 5000) throw new Error('Page exceeds the 5000 element limit. Check a smaller page or component.');
+  const hovered = allElements.findLast(el => el.matches(':hover'));
+  let titleOwner: Element | null | undefined = hovered;
+  while (titleOwner && !(titleOwner instanceof HTMLElement && titleOwner.hasAttribute('title')))
+    titleOwner = titleOwner.parentElement;
+  const title = titleOwner?.getAttribute('title');
+  if (title?.trim()) {
+    for (let trigger = hovered; trigger; trigger = parent(trigger) ?? undefined) {
+      const declared = (trigger.getAttribute('data-ui-tooltip') ?? '').split(/\s+/).filter(Boolean);
+      const described = (trigger.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+      const root = trigger.getRootNode() as Document | ShadowRoot;
+      const openLabel = [...new Set([...declared, ...described])].some(id => {
+        const matches = root.querySelectorAll(`#${CSS.escape(id)}`);
+        const label = matches[0];
+        return matches.length === 1 && (declared.includes(id) || label.matches('[role="tooltip"]')) &&
+          hasVisibleContent(label) && !visuallyHidden(label) &&
+          [label, ...descendants(label)].some(node => visible(node) && !visuallyHidden(node) &&
+            (textRects(node).length > 0 || generatedTextStyles(node).length > 0));
+      });
+      if (!openLabel) continue;
+      add('native-tooltip-conflict', trigger, `an open custom tooltip and a native title=${JSON.stringify(title)}`,
+        'only the custom tooltip on hover', 'Remove the HTML title. Keep the accessible name.',
+        titleOwner === trigger ? null : titleOwner, { category: 'design', phase: 'hover', status: 'failed' });
+      break;
+    }
+  }
   const styles = new Map(elements.map(el => [el, getComputedStyle(el)]));
-  let controls: Element[];
+  let semanticControls: Element[];
   let dropdownControls: Element[];
   contrast.setup(document);
   try {
-    controls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
+    semanticControls = elements.filter(el => el.matches('button, input[type="button"], input[type="submit"], input[type="reset"], input[type="image"]') || contrast.commons.aria.getRole(el, { fallback: true }) === 'button');
     dropdownControls = elements.filter(el => el.matches('select') || contrast.commons.aria.getRole(el, { fallback: true }) === 'combobox');
   } finally { contrast.teardown(); }
-  const isText = (el: Element) => textRects(el).length > 0 || el.matches('textarea, select') ||
-    el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type);
+  const controls = semanticControls.filter(el => !visuallyHidden(el));
+  const loadedImages = new Set<Element>();
+  await Promise.all(elements.filter(el => el.matches('input[type="image"][src]')).map(async el => {
+    const image = new Image();
+    image.src = (el as HTMLInputElement).src;
+    try { await image.decode(); loadedImages.add(el); } catch { /* A failed image can paint its alternate text. */ }
+  }));
+  const isText = (el: Element) => {
+    let groupLabel = false;
+    if (el instanceof HTMLOptGroupElement && el.label.trim()) {
+      const select = el.closest('select');
+      groupLabel = !!select && !(getComputedStyle(select).appearance === 'base-select' && el.querySelector(':scope > legend'));
+    }
+    return textRects(el).length > 0 || el.matches('textarea, select') || groupLabel ||
+      el instanceof HTMLOptionElement && el.text.trim().length > 0 && !!el.closest('select')?.matches('select[multiple], select[size]:not([size="0"]):not([size="1"])') ||
+      el instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'color'].includes(el.type) && !loadedImages.has(el);
+  };
   const checkFontSize = (el: Element, style: CSSStyleDeclaration, pseudo = '') => {
     const size = parseFloat(style.fontSize);
     const tooltip = el.closest('[role="tooltip"]');
@@ -60,6 +133,24 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     const style = getComputedStyle(el, '::placeholder');
     return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? style : null;
   };
+  const textPseudos = (el: Element) => {
+    const pseudos: string[] = [];
+    if (el.matches('input[type="file"]')) pseudos.push('::file-selector-button');
+    const style = styles.get(el)!;
+    if (style.display === 'list-item') {
+      const marker = getComputedStyle(el, '::marker');
+      if (!['none', 'normal', '""'].includes(marker.content) || marker.content === 'normal' && style.listStyleImage === 'none' && /^(decimal|lower-|upper-)/.test(style.listStyleType)) pseudos.push('::marker');
+    }
+    if (['block', 'list-item', 'inline-block', 'flow-root', 'table-cell', 'table-caption'].includes(style.display)) pseudos.push('::first-letter', '::first-line');
+    return pseudos.flatMap(pseudo => {
+      const style = getComputedStyle(el, pseudo);
+      if (['::first-letter', '::first-line'].includes(pseudo)) {
+        if (style.fontFamily === styles.get(el)!.fontFamily && style.fontSize === styles.get(el)!.fontSize) return [];
+        if (![el, ...el.querySelectorAll('*')].some(node => visible(node) && textRects(node).length > 0)) return [];
+      }
+      return style.display !== 'none' && style.visibility === 'visible' && parseFloat(style.opacity) > 0 && parseFloat(style.fontSize) > 0 ? [{ pseudo, style }] : [];
+    });
+  };
   const hasTabularNumbers = (style: CSSStyleDeclaration) => {
     const feature = style.fontFeatureSettings.match(/['"]tnum['"](?:\s+(\d+|on|off))?(?=\s*,|$)/)?.[1];
     return /['"]tnum['"]/.test(style.fontFeatureSettings) ? feature !== 'off' && feature !== '0' : style.fontVariantNumeric.split(/\s+/).includes('tabular-nums');
@@ -67,11 +158,11 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   let numericElements = 0;
   for (const el of elements) {
     const style = styles.get(el)!;
-    if (isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
-    if (!el.closest('pre, code, kbd, samp'))
-      for (const { pseudo, style: textStyle } of generatedTextStyles(el)) checkFont(el, textStyle, pseudo);
+    if (!visuallyHidden(el) && isText(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, style);
+    if (!visuallyHidden(el) && !el.closest('pre, code, kbd, samp'))
+      for (const { pseudo, style: textStyle } of [...generatedTextStyles(el), ...textPseudos(el)]) checkFont(el, textStyle, pseudo);
     const placeholder = placeholderStyle(el);
-    if (placeholder && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
+    if (placeholder && !visuallyHidden(el) && !el.closest('pre, code, kbd, samp')) checkFont(el, placeholder, '::placeholder');
     // Numeric meaning is explicit for live values. Numeric table cells are inferred.
     const numericCell = el.matches('td') && /^[+−-]?[\d\s,.:%$€£]+$/.test((el.textContent ?? '').trim()) && /\d/.test(el.textContent ?? '');
     if (el.matches('[data-ui-number]') || numericCell) {
@@ -118,11 +209,12 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         add('copy', el, phrase, 'text without prohibited phrases', 'Remove the phrase or use specific text that helps the user.');
     }
   }
-  const groups = new Map<Element | null, Element[]>();
+  const groups = new Map<Node, Element[]>();
+  const actionGroups = ['[data-ui-actions]', ...policy.controlGapRules.map(rule => rule.selector)].join(', ');
   for (const el of controls) {
-    const parent = el.closest('[data-ui-actions]') ?? el.parentElement;
-    const list = groups.get(parent) ?? [];
-    list.push(el); groups.set(parent, list);
+    const group = el.closest(actionGroups) ?? el.parentElement ?? el.getRootNode();
+    const list = groups.get(group) ?? [];
+    list.push(el); groups.set(group, list);
   }
   // Use the same geometry for control groups and component stacks.
   const checkGap = (group: Element[], rule: RuleId, minimum: number) => {
@@ -135,17 +227,48 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         add(rule, group[i], `${Number(gap.toFixed(2))}px`, `a gap of at least ${minimum}px`, 'Use a layout group with an approved gap. Check for overlap.', group[j]);
     }
   };
-  for (const group of groups.values()) checkGap(group, 'control-gap', policy.minControlGap);
+  for (const [owner, group] of groups) {
+    const rule = owner instanceof Element ? policy.controlGapRules.find(rule => owner.matches(rule.selector)) : undefined;
+    checkGap(group, 'control-gap', rule?.minGap ?? policy.minControlGap);
+  }
   const layoutChildren = (el: Element): Element[] => [...el.children].flatMap(child =>
     getComputedStyle(child).display === 'contents' ? layoutChildren(child) : visible(child) ? [child] : []);
-  for (const el of [...document.querySelectorAll('[data-ui-stack]')].filter(hasVisibleContent))
+  for (const el of allElements.filter(el => el.matches('[data-ui-stack]')).filter(hasVisibleContent))
     checkGap(layoutChildren(el), 'layout-gap', policy.minLayoutGap);
+  for (const rule of policy.layoutSeparationRules) {
+    for (const group of allElements.filter(el => el.matches(rule.selector) && hasVisibleContent(el))) {
+      const targets = (query: string) => [...group.querySelectorAll(query)].filter(el => {
+        const bounds = el.getBoundingClientRect();
+        return el.closest(rule.selector) === group && bounds.width > 0 && bounds.height > 0 && visible(el) && !visuallyHidden(el);
+      });
+      const before = targets(rule.before), after = targets(rule.after);
+      const relation = `${rule.axis} separation from ${rule.before} to ${rule.after}`;
+      const range = rule.maxGap === undefined ? `at least ${rule.minGap}px` : `${rule.minGap} to ${rule.maxGap}px`;
+      if (before.length !== 1 || after.length !== 1 || before[0] === after[0]) {
+        const actual = before.length === 1 && after.length === 1 ? 'both selectors match the same element' : `${before.length} before and ${after.length} after matches`;
+        add('layout-separation', group, actual, `one distinct visible element per selector for ${relation}`,
+          'Use selectors that match one visible element in this group and state.', undefined, { status: 'unresolved' });
+        continue;
+      }
+      const a = before[0].getBoundingClientRect(), b = after[0].getBoundingClientRect();
+      const gap = rule.axis === 'vertical' ? b.top - a.bottom
+        : getComputedStyle(group).direction === 'rtl' ? a.left - b.right : b.left - a.right;
+      if (gap < rule.minGap - 0.1 || gap > (rule.maxGap ?? Infinity) + 0.1) {
+        add('layout-separation', after[0], `${Number(gap.toFixed(2))}px`, `${relation} of ${range}`,
+          'Place the elements in the expected order with the specified gap.', before[0]);
+      }
+    }
+  }
   let alignmentGroups = 0;
-  for (const group of [...document.querySelectorAll('[data-ui-align]')].filter(hasVisibleContent)) {
-    const alignment = group.getAttribute('data-ui-align');
-    const items = [...group.querySelectorAll('[data-ui-align-item]')].filter(el => el.closest('[data-ui-align]') === group);
+  const alignments = ['[data-ui-align]', ...policy.alignmentRules.map(rule => rule.selector)].join(', ');
+  for (const group of allElements.filter(el => el.matches(alignments)).filter(hasVisibleContent)) {
+    const rule = policy.alignmentRules.find(rule => group.matches(rule.selector));
+    const alignment = rule?.alignment ?? group.getAttribute('data-ui-align');
+    const items = [...group.querySelectorAll(rule?.itemSelector ?? '[data-ui-align-item]')]
+      .filter(el => el.closest(alignments) === group);
     if (!['start', 'center', 'end'].includes(alignment ?? '') || items.length < 2) {
-      add('layout-alignment', group, `${alignment || 'empty alignment'} with ${items.length} marked items`, 'start, center, or end alignment with at least two marked items', 'Set data-ui-align and mark the elements that must align with data-ui-align-item.');
+      add('layout-alignment', group, `${alignment || 'empty alignment'} with ${items.length} marked items`, 'start, center, or end alignment with at least two marked items',
+        rule ? 'Select at least two items in the alignment rule.' : 'Set data-ui-align and mark the elements that must align with data-ui-align-item.');
       continue;
     }
     const targets = items.filter(visible);
@@ -171,11 +294,14 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   });
   const transformFor = (container: Element) => {
     let transform = new DOMMatrix();
-    for (let node: Element | null = container; node; node = node.parentElement) {
+    for (let node: Element | null = container; node; node = parent(node)) {
       const style = getComputedStyle(node);
-      const matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
+      let matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
       const [x, y = x] = style.scale === 'none' ? [1, 1] : style.scale.split(/\s+/).map(Number);
-      transform = matrix.scale(x, y).multiply(transform);
+      const rotate = /^-?[\d.]+deg$/.test(style.rotate) ? parseFloat(style.rotate) : 0;
+      if (x !== 1 || y !== 1) matrix = new DOMMatrix().scale(x, y).multiply(matrix);
+      if (rotate) matrix = new DOMMatrix().rotate(rotate).multiply(matrix);
+      transform = matrix.multiply(transform);
     }
     return transform;
   };
@@ -192,37 +318,52 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     return { x: width ? bounds.width / width : Math.hypot(transform.a, transform.b), y: height ? bounds.height / height : Math.hypot(transform.c, transform.d) };
   };
   // One client-box primitive for control insets and text clipping.
-  const clientBounds = (container: Element, box: 'padding-box' | 'content-box' | 'border-box' = 'padding-box') => {
+  const clientBounds = (container: Element, box: 'padding-box' | 'content-box' | 'border-box' = 'padding-box', inset = [0, 0, 0, 0]) => {
     const bounds = container.getBoundingClientRect();
     // Client dimensions use rounded layout pixels, so their scale uses offset dimensions.
     const scaleX = (container as HTMLElement).offsetWidth ? bounds.width / (container as HTMLElement).offsetWidth : container instanceof SVGSVGElement ? scaleFor(container).x : 1;
     const scaleY = (container as HTMLElement).offsetHeight ? bounds.height / (container as HTMLElement).offsetHeight : container instanceof SVGSVGElement ? scaleFor(container).y : 1;
+    const width = container instanceof HTMLElement ? container.offsetWidth : bounds.width / scaleX;
+    const height = container instanceof HTMLElement ? container.offsetHeight : bounds.height / scaleY;
     const style = getComputedStyle(container);
     const inline = container instanceof HTMLElement && style.display === 'inline';
     let clientLeft = inline ? parseFloat(style.borderLeftWidth) : container.clientLeft;
     let clientTop = inline ? parseFloat(style.borderTopWidth) : container.clientTop;
-    let clientWidth = inline ? bounds.width / scaleX - clientLeft - parseFloat(style.borderRightWidth) : container.clientWidth;
-    let clientHeight = inline ? bounds.height / scaleY - clientTop - parseFloat(style.borderBottomWidth) : container.clientHeight;
+    let clientWidth = inline ? width - clientLeft - parseFloat(style.borderRightWidth) : container.clientWidth;
+    let clientHeight = inline ? height - clientTop - parseFloat(style.borderBottomWidth) : container.clientHeight;
     if (box === 'border-box') {
       clientLeft = clientTop = 0;
-      clientWidth = bounds.width / scaleX;
-      clientHeight = bounds.height / scaleY;
+      clientWidth = width;
+      clientHeight = height;
     } else if (box === 'content-box') {
       clientLeft += parseFloat(style.paddingLeft);
       clientTop += parseFloat(style.paddingTop);
       clientWidth -= parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
       clientHeight -= parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     }
+    clientLeft += inset[3]; clientTop += inset[0];
+    clientWidth = Math.max(0, clientWidth - inset[1] - inset[3]);
+    clientHeight = Math.max(0, clientHeight - inset[0] - inset[2]);
     const transform = transformFor(container);
-    const left = transform.a < 0 ? bounds.right - (clientLeft + clientWidth) * scaleX : bounds.left + clientLeft * scaleX;
-    const top = transform.d < 0 ? bounds.bottom - (clientTop + clientHeight) * scaleY : bounds.top + clientTop * scaleY;
-    const result = { left, top, right: left + clientWidth * scaleX, bottom: top + clientHeight * scaleY };
+    const projectedWidth = Math.abs(transform.a) * width + Math.abs(transform.c) * height;
+    const projectedHeight = Math.abs(transform.b) * width + Math.abs(transform.d) * height;
+    const zoomX = projectedWidth ? bounds.width / projectedWidth : 1, zoomY = projectedHeight ? bounds.height / projectedHeight : 1;
+    const originX = transform.e + Math.min(0, transform.a * width) + Math.min(0, transform.c * height);
+    const originY = transform.f + Math.min(0, transform.b * width) + Math.min(0, transform.d * height);
+    const corners = [[clientLeft, clientTop], [clientLeft + clientWidth, clientTop], [clientLeft, clientTop + clientHeight], [clientLeft + clientWidth, clientTop + clientHeight]]
+      .map(([x, y]) => new DOMPoint(x, y).matrixTransform(transform));
+    const result = {
+      left: bounds.left + (Math.min(...corners.map(point => point.x)) - originX) * zoomX,
+      top: bounds.top + (Math.min(...corners.map(point => point.y)) - originY) * zoomY,
+      right: bounds.left + (Math.max(...corners.map(point => point.x)) - originX) * zoomX,
+      bottom: bounds.top + (Math.max(...corners.map(point => point.y)) - originY) * zoomY,
+    };
     if (!Object.values(result).every(Number.isFinite)) throw new Error('A clipping or control container must have a measurable HTML box.');
     return result;
   };
   let insetControls = 0;
   for (const el of controls) {
-    const container = el.parentElement!.closest(policy.controlContainers.join(', '));
+    const container = parent(el)?.closest(policy.controlContainers.join(', '));
     if (!container || !visible(container)) continue;
     insetControls++;
     const innerBounds = clientBounds(container);
@@ -241,7 +382,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
   };
   const controlContentCoverage: PageReport['controlContentCoverage'] = { checked: 0, unmeasured: [] };
-  const contentControls = new Set([...controls, ...dropdownControls]);
+  const contentControls = new Set([...controls, ...dropdownControls.filter(el => !visuallyHidden(el))]);
   for (const container of elements) {
     const rule = policy.contentInsetRules.find(rule => container.matches(rule.selector));
     let customContent = 0;
@@ -269,7 +410,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         if (el.closest('svg') && !el.matches('svg')) continue;
         const style = getComputedStyle(el);
         let clipped = false;
-        for (let node: Element | null = el; node; node = node.parentElement) {
+        for (let node: Element | null = el; node; node = parent(node)) {
           const item = getComputedStyle(node);
           if (item.clip !== 'auto' || item.clipPath !== 'none') { clipped = true; break; }
           if (node === container) break;
@@ -327,11 +468,24 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     return false;
   };
   const viewport = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: document.documentElement.clientHeight };
+  const containsPaint = (style: CSSStyleDeclaration) => /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
+  const overflowClipBounds = (el: Element) => {
+    const value = styleOf(el).overflowClipMargin;
+    const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
+    const margin = parseFloat(value.match(/[\d.]+px/)?.[0] ?? '0');
+    const bounds = clientBounds(el, reference), scale = scaleFor(el);
+    return {
+      left: bounds.left - margin * scale.x,
+      right: bounds.right + margin * scale.x,
+      top: bounds.top - margin * scale.y,
+      bottom: bounds.bottom + margin * scale.y,
+    };
+  };
   const contextFor = (el: Element) => {
     const ancestors: Element[] = [];
     let containingBlock: Element | null = null;
     let overlay = false;
-    for (let node: Element | null = el; node; node = node.parentElement) {
+    for (let node: Element | null = el; node; node = parent(node)) {
       overlay ||= styleOf(node).position === 'fixed' || node.matches('dialog[open], [role="dialog"], [role="alertdialog"], [role="tooltip"], [data-ui-overlay]');
       // Overflow below an absolute box's containing block cannot clip that box.
       if (containingBlock && node !== containingBlock) continue;
@@ -344,24 +498,19 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
     }
     const clips = ancestors.filter(node => node instanceof SVGSVGElement || node instanceof HTMLElement && !['inline', 'contents'].includes(styleOf(node).display)).map(node => {
       const style = styleOf(node);
-      const paint = /(?:^|\s)(paint|strict|content)(?:\s|$)/.test(style.contain);
+      const paint = containsPaint(style);
       const overflowX = paint && style.overflowX === 'visible' ? 'clip' : style.overflowX;
       const overflowY = paint && style.overflowY === 'visible' ? 'clip' : style.overflowY;
       return { element: node, overflowX, overflowY, x: /^(hidden|clip)$/.test(overflowX) || /^(auto|scroll)$/.test(overflowX) && !scrolls(node, 'X'), y: /^(hidden|clip)$/.test(overflowY) || /^(auto|scroll)$/.test(overflowY) && !scrolls(node, 'Y') };
     }).filter(clip => clip.x || clip.y).map(clip => {
-      const style = styleOf(clip.element);
-      const value = style.overflowClipMargin;
-      const reference = value.includes('content-box') ? 'content-box' : value.includes('border-box') ? 'border-box' : 'padding-box';
-      const margin = parseFloat(value.match(/[\d.]+px/)?.[0] ?? '0');
       const base = clientBounds(clip.element);
-      const expanded = clientBounds(clip.element, reference);
-      const scale = scaleFor(clip.element);
       const x = clip.overflowX === 'clip', y = clip.overflowY === 'clip';
+      const expanded = x || y ? overflowClipBounds(clip.element) : base;
       return { ...clip, bounds: {
-        left: x ? expanded.left - margin * scale.x : base.left,
-        right: x ? expanded.right + margin * scale.x : base.right,
-        top: y ? expanded.top - margin * scale.y : base.top,
-        bottom: y ? expanded.bottom + margin * scale.y : base.bottom,
+        left: x ? expanded.left : base.left,
+        right: x ? expanded.right : base.right,
+        top: y ? expanded.top : base.top,
+        bottom: y ? expanded.bottom : base.bottom,
       } };
     });
     return {
@@ -374,22 +523,31 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       textScrollY: ancestors.some(node => scrolls(node, 'Y') && node !== document.body && node !== document.documentElement),
     };
   };
-  for (const el of controls) {
+  const shapeBounds = (el: Element): Bounds | null => {
+    const value = styleOf(el).clipPath;
+    if (value === 'none') return null;
+    const match = /^inset\(([^()]*)\)(?: border-box)?$/.exec(value);
+    const values = match?.[1].split(/\s+round\s+/)[0].trim().split(/\s+/);
+    if (!(el instanceof HTMLElement) || !values?.length || values.length > 4 || values.some(value => !/^-?[\d.]+(?:px|%)$/.test(value))) return null;
+    const [top, right = top, bottom = top, left = right] = values;
+    const inset = [top, right, bottom, left].map((value, index) => parseFloat(value) * (value.endsWith('%') ? (index % 2 ? el.offsetWidth : el.offsetHeight) / 100 : 1));
+    return clientBounds(el, 'border-box', inset);
+  };
+  const reachableSize = (el: Element) => {
     let { left, right, top, bottom } = el.getBoundingClientRect();
     const { ancestors, clips } = contextFor(el);
-    let maxWidth = Infinity, maxHeight = Infinity;
-    for (const clip of clips) {
-      if (clip.element === el) continue;
-      if (clip.x && !scrollsWithin(ancestors, clip, 'X')) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
-      if (clip.y && !scrollsWithin(ancestors, clip, 'Y')) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
+    const ownShape = shapeBounds(el);
+    if (ownShape) {
+      left = Math.max(left, ownShape.left); right = Math.min(right, ownShape.right);
+      top = Math.max(top, ownShape.top); bottom = Math.min(bottom, ownShape.bottom);
     }
-    // A scrollport can expose its scrollable area, but not overflow before its origin.
-    // Read the scroll offsets; do not scroll the app to measure its controls.
+    let maxWidth = Math.max(0, right - left), maxHeight = Math.max(0, bottom - top);
+    // Carry reachable positions out through nested scrollports without scrolling the app.
     for (const node of ancestors.slice(1)) {
       const scrollX = scrolls(node, 'X'), scrollY = scrolls(node, 'Y');
-      if (!scrollX && !scrollY) continue;
-      const style = styleOf(node), bounds = clientBounds(node), scale = scaleFor(node), transform = transformFor(node);
-      const signX = transform.a < 0 ? -1 : 1, signY = transform.d < 0 ? -1 : 1;
+      const clip = clips.find(clip => clip.element === node), shape = shapeBounds(node);
+      if (!scrollX && !scrollY && !clip && !shape) continue;
+      const style = styleOf(node), bounds = clientBounds(node), transform = transformFor(node);
       const vertical = style.writingMode !== 'horizontal-tb';
       let reverseX = vertical ? style.writingMode.endsWith('-rl') : style.direction === 'rtl';
       let reverseY = vertical && ((style.direction === 'rtl') !== (style.writingMode === 'sideways-lr'));
@@ -402,24 +560,39 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
           if (mainX) reverseY = !reverseY; else reverseX = !reverseX;
         }
       }
-      reverseX = reverseX !== (signX < 0);
-      reverseY = reverseY !== (signY < 0);
-      if (scrollX) {
-        maxWidth = Math.min(maxWidth, bounds.right - bounds.left);
-        const range = node.scrollWidth - node.clientWidth;
-        const origin = bounds.left - node.scrollLeft * scale.x * signX;
-        left = Math.max(left, origin - (reverseX ? range : 0) * scale.x);
-        right = Math.min(right, origin + (node.clientWidth + (reverseX ? 0 : range)) * scale.x);
+      const rangeX = scrollX ? node.scrollWidth - node.clientWidth : 0, rangeY = scrollY ? node.scrollHeight - node.clientHeight : 0;
+      const startX = scrollX ? node.scrollLeft : 0, startY = scrollY ? node.scrollTop : 0;
+      const minX = startX - (reverseX ? 0 : rangeX), maxX = startX + (reverseX ? rangeX : 0);
+      const minY = startY - (reverseY ? 0 : rangeY), maxY = startY + (reverseY ? rangeY : 0);
+      const projectedWidth = Math.abs(transform.a) * node.clientWidth + Math.abs(transform.c) * node.clientHeight;
+      const projectedHeight = Math.abs(transform.b) * node.clientWidth + Math.abs(transform.d) * node.clientHeight;
+      const zoomX = projectedWidth ? (bounds.right - bounds.left) / projectedWidth : 1;
+      const zoomY = projectedHeight ? (bounds.bottom - bounds.top) / projectedHeight : 1;
+      left += (Math.min(transform.a * minX, transform.a * maxX) + Math.min(transform.c * minY, transform.c * maxY)) * zoomX;
+      right += (Math.max(transform.a * minX, transform.a * maxX) + Math.max(transform.c * minY, transform.c * maxY)) * zoomX;
+      top += (Math.min(transform.b * minX, transform.b * maxX) + Math.min(transform.d * minY, transform.d * maxY)) * zoomY;
+      bottom += (Math.max(transform.b * minX, transform.b * maxX) + Math.max(transform.d * minY, transform.d * maxY)) * zoomY;
+      const swapped = Math.abs(transform.a) < 1e-8 && Math.abs(transform.d) < 1e-8;
+      if (scrollX || scrollY) {
+        left = Math.max(left, bounds.left); right = Math.min(right, bounds.right);
+        top = Math.max(top, bounds.top); bottom = Math.min(bottom, bounds.bottom);
+      } else if (clip) {
+        if (swapped ? clip.y : clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
+        if (swapped ? clip.x : clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
       }
-      if (scrollY) {
-        maxHeight = Math.min(maxHeight, bounds.bottom - bounds.top);
-        const range = node.scrollHeight - node.clientHeight;
-        const origin = bounds.top - node.scrollTop * scale.y * signY;
-        top = Math.max(top, origin - (reverseY ? range : 0) * scale.y);
-        bottom = Math.min(bottom, origin + (node.clientHeight + (reverseY ? 0 : range)) * scale.y);
+      if (shape) {
+        left = Math.max(left, shape.left); right = Math.min(right, shape.right);
+        top = Math.max(top, shape.top); bottom = Math.min(bottom, shape.bottom);
       }
+      maxWidth = Math.min(maxWidth, Math.max(0, right - left));
+      maxHeight = Math.min(maxHeight, Math.max(0, bottom - top));
     }
-    const rect = { width: Math.min(maxWidth, Math.max(0, right - left)), height: Math.min(maxHeight, Math.max(0, bottom - top)) };
+    const unresolved = ancestors.some(node => styleOf(node).clipPath !== 'none' && !shapeBounds(node));
+    return { width: maxWidth, height: maxHeight, unresolved };
+  };
+  for (const el of controls) {
+    const rect = reachableSize(el);
+    if (rect.unresolved) add('control-size', el, 'clip-path hit area could not be measured', 'a measurable control hit area', 'Review the clipped control hit area.', undefined, { status: 'unresolved' });
     const minimum = policy.controlSizeRules.find(rule => el.matches(rule.selector) && innerWidth >= (rule.minViewportWidth ?? 1) && innerWidth <= (rule.maxViewportWidth ?? 10000))?.minSize ?? policy.minControlSize;
     if (rect.width + 0.1 < minimum || rect.height + 0.1 < minimum)
       add('control-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `at least ${minimum}px in each dimension`, 'Increase the control hit area.');
@@ -427,17 +600,105 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   for (const el of elements) {
     const rule = policy.iconSizeRules.find(rule => el.matches(rule.selector));
     if (!rule) continue;
-    let { left, right, top, bottom } = el.getBoundingClientRect();
-    for (const clip of contextFor(el).clips) {
-      if (clip.element === el) continue;
-      if (clip.x) { left = Math.max(left, clip.bounds.left); right = Math.min(right, clip.bounds.right); }
-      if (clip.y) { top = Math.max(top, clip.bounds.top); bottom = Math.min(bottom, clip.bounds.bottom); }
-    }
-    const rect = { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    const rect = reachableSize(el);
+    if (rect.unresolved) add('icon-size', el, 'clip-path bounds could not be measured', 'measurable icon bounds', 'Review the clipped icon bounds.', undefined, { status: 'unresolved' });
     if (!rule.sizes.some(size => Math.abs(rect.width - size) <= 0.1 && Math.abs(rect.height - size) <= 0.1))
       add('icon-size', el, `${Number(rect.width.toFixed(2))} × ${Number(rect.height.toFixed(2))}px`, `a square icon of one of ${rule.sizes.join(', ')}px`, 'Use an allowed icon size. Check the rendered width, height, borders, and transforms.');
   }
   const outside = (bounds: Bounds, rect: Bounds, x: boolean, y: boolean) => Object.entries(edgeInsets(bounds, rect)).filter(([edge, distance]) => distance < -1 && ((edge === 'left' || edge === 'right') ? x : y));
+  const imageSelector = policy.fullImageSelectors.join(', ');
+  const checkFullImage = (el: HTMLImageElement, context: ReturnType<typeof contextFor>) => {
+    const expected = 'the full image inside its frame';
+    const unresolved = (actual: string) => add('image-framing', el, actual, expected, 'Check this image in the tested state.', undefined, { status: 'unresolved' });
+    if (!el.complete || !el.naturalWidth || !el.naturalHeight) {
+      unresolved('image dimensions are unavailable');
+      return;
+    }
+    const style = styleOf(el);
+    const fit = style.objectFit;
+    const viewBox = style.getPropertyValue('object-view-box');
+    if (!['fill', 'contain', 'cover', 'none', 'scale-down'].includes(fit) ||
+        (viewBox && viewBox !== 'none') || !['normal', 'none'].includes(style.content)) {
+      unresolved('the image uses unsupported sizing or replacement');
+      return;
+    }
+    const content = clientBounds(el, 'content-box');
+    const scale = scaleFor(el);
+    const width = (content.right - content.left) / scale.x;
+    const height = (content.bottom - content.top) / scale.y;
+    const transform = transformFor(el);
+    const rectangular = (node: Element) => {
+      const style = styleOf(node);
+      const matrix = transformFor(node);
+      return matrix.is2D && Math.abs(matrix.b) < 1e-8 && Math.abs(matrix.c) < 1e-8 &&
+        style.perspective === 'none' && style.rotate.split(' ').length === 1 &&
+        style.clip === 'auto' && style.maskImage === 'none' && style.clipPath === 'none';
+    };
+    let measurable = width > 0 && height > 0;
+    for (let node: Element | null = el; node && measurable; node = parent(node)) measurable = rectangular(node);
+    if (!measurable) {
+      unresolved('image or clip bounds could not be measured as rectangles');
+      return;
+    }
+    const contain = Math.min(width / el.naturalWidth, height / el.naturalHeight);
+    const cover = Math.max(width / el.naturalWidth, height / el.naturalHeight);
+    const factor = fit === 'contain' ? contain : fit === 'cover' ? cover : fit === 'scale-down' ? Math.min(1, contain) : 1;
+    const imageWidth = fit === 'fill' ? width : el.naturalWidth * factor;
+    const imageHeight = fit === 'fill' ? height : el.naturalHeight * factor;
+    // Let the browser normalize keywords and edge offsets to two coordinates.
+    const position = document.createElement('div').style;
+    position.backgroundPosition = style.objectPosition;
+    const offset = (value: string, space: number) => {
+      const simple = /^(-?[\d.]+)(px|%)$/.exec(value);
+      if (simple) return Number(simple[1]) * (simple[2] === '%' ? space / 100 : 1);
+      try {
+        return [...CSSNumericValue.parse(value).toSum('px', 'percent').values].reduce((sum, part) => {
+          const unit = part as CSSUnitValue;
+          return sum + unit.value * (unit.unit === 'percent' ? space / 100 : 1);
+        }, 0);
+      } catch { return NaN; }
+    };
+    const x = offset(position.backgroundPositionX, width - imageWidth);
+    const y = offset(position.backgroundPositionY, height - imageHeight);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      unresolved('object-position could not be measured');
+      return;
+    }
+    const left = content.left + (transform.a < 0 ? width - imageWidth - x : x) * scale.x;
+    const top = content.top + (transform.d < 0 ? height - imageHeight - y : y) * scale.y;
+    const image = { left, top, right: left + imageWidth * scale.x, bottom: top + imageHeight * scale.y };
+    const clips = context.clips.filter(clip => clip.element !== el);
+    // Chromium uses the clip margin for replaced content even for hidden or auto overflow.
+    if (style.overflowX !== style.overflowY) {
+      unresolved('the image uses different overflow modes on each axis');
+      return;
+    }
+    if (style.overflowX !== 'visible' || containsPaint(style))
+      clips.unshift({ element: el, bounds: overflowClipBounds(el), x: true, y: true, overflowX: 'clip', overflowY: 'clip' });
+    for (const clip of clips) {
+      const cut = outside(clip.bounds, image, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y'));
+      if (!cut.length) {
+        const clipStyle = styleOf(clip.element);
+        const radii = [clipStyle.borderTopLeftRadius, clipStyle.borderTopRightRadius,
+          clipStyle.borderBottomRightRadius, clipStyle.borderBottomLeftRadius];
+        const radius = Math.max(...radii.map(Number.parseFloat));
+        if (radii.some(value => value !== '0px')) {
+          const scale = scaleFor(clip.element);
+          const inset = radius + parseFloat(clipStyle.overflowClipMargin.match(/[\d.]+px/)?.[0] ?? '0');
+          const horizontal = image.left >= clip.bounds.left + inset * scale.x && image.right <= clip.bounds.right - inset * scale.x;
+          const vertical = image.top >= clip.bounds.top + inset * scale.y && image.bottom <= clip.bounds.bottom - inset * scale.y;
+          if (radii.some(value => !/^\d+(?:\.\d+)?px$/.test(value)) || !(horizontal || vertical)) {
+            unresolved('rounded image clips need review');
+            return;
+          }
+        }
+        continue;
+      }
+      add('image-framing', el, cut.map(([edge, distance]) => `${edge} crop ${Number((-distance).toFixed(2))}px`).join(', '), expected,
+        'Fit the image within its content box and check the size and overflow of its frame.', clip.element === el ? undefined : clip.element);
+      return;
+    }
+  };
   const clippedRect = (rect: Bounds, clips: Clip[], el: Element, includeSelf: boolean) => {
     const result = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
     for (const clip of clips) {
@@ -449,8 +710,12 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   };
   for (const el of elements.filter(el => el instanceof HTMLElement || el instanceof SVGSVGElement || el instanceof SVGTextContentElement)) {
     const context = contextFor(el);
+    if (imageSelector && el instanceof HTMLImageElement && el.matches(imageSelector) && !visuallyHidden(el))
+      checkFullImage(el, context);
+    // Check the current style so text that appears on focus can still fail.
+    const checkClipping = context.clips.length > 0 && !visuallyHidden(el);
     const generated = generatedTextRects(el);
-    if (generated === null && context.clips.length)
+    if (generated === null && checkClipping)
       add('content-clipping', el, 'generated text geometry could not be measured', 'text lines inside the clipping area', 'Review the generated text and its clipping area.', undefined, { status: 'unresolved' });
     const rects = [...textRects(el), ...(generated ?? [])];
     const escaped = new Map<string, number>();
@@ -477,6 +742,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       if (overflow.size)
         add('content-overflow', el, [...overflow].map(([edge, amount]) => `${edge} text overflow ${Number(amount.toFixed(2))}px`).join(', '), 'text inside the nearest data-ui-content container', 'Let text wrap or provide a local scroll region inside the marked container.', container);
     }
+    if (!checkClipping) continue;
     for (const clip of context.clips) {
       const cut = new Map<string, number>();
       for (const rect of rects) for (const [edge, distance] of outside(clip.bounds, rect, clip.x && !scrollsWithin(context.ancestors, clip, 'X'), clip.y && !scrollsWithin(context.ancestors, clip, 'Y')))
@@ -518,7 +784,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const el = node.element;
       if (!inScope.has(el) || !visible(el) || el.closest('button:disabled, [aria-disabled="true"]')) continue;
       if (el.matches('input:placeholder-shown, textarea:placeholder-shown') && el.getAttribute('placeholder')?.trim()) continue;
-      if (svgContrast.some(result => document.querySelector(result.selector) === el)) continue;
+      if (svgContrast.some(result => resolveSelector(result.selector) === el)) continue;
       const check = [...node.any, ...node.all, ...node.none].find(check => check.id === 'color-contrast');
       const data = check?.data ?? {};
       reportContrast(el, status, data, check?.message ?? node.failureSummary);
@@ -526,7 +792,7 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
   }
   for (const result of svgContrast) {
     if (result.status === 'passed') continue;
-    const el = document.querySelector(result.selector);
+    const el = resolveSelector(result.selector);
     if (!el || !inScope.has(el)) continue;
     reportContrast(el, result.status, { expectedContrastRatio: `${result.required}:1`, contrastRatio: result.contrastRatio, fgColor: result.fgColor, bgColor: result.bgColor }, result.reason);
   }
@@ -539,9 +805,9 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       const required = parseFloat(style.fontSize) >= 24 || (parseFloat(style.fontWeight) >= 700 && parseFloat(style.fontSize) >= 56 / 3) ? 3 : 4.5;
       const data = { expectedContrastRatio: `${required}:1` };
       const rects = textRects(el);
-      let box = el.parentElement, unsupported = false;
-      while (box && rects.some(rect => outside(box!.getBoundingClientRect(), rect, true, true).length)) box = box.parentElement;
-      for (let node: Element | null = el; node; node = node.parentElement) {
+      let box = parent(el), unsupported = false;
+      while (box && rects.some(rect => outside(box!.getBoundingClientRect(), rect, true, true).length)) box = parent(box);
+      for (let node: Element | null = el; node; node = parent(node)) {
         const nodeStyle = styleOf(node);
         if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal' || nodeStyle.textShadow !== 'none' || parseFloat(nodeStyle.webkitTextStrokeWidth) > 0) unsupported = true;
         if (box && node !== box && box.contains(node) && nodeStyle.display !== 'contents') {
@@ -575,16 +841,38 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
         if (ratio < required) reportContrast(el, 'failed', { ...data, contrastRatio: Math.floor(ratio * 100) / 100, fgColor: blended.toHexString(), bgColor: background.toHexString() });
       } catch (error) { reportContrast(el, 'unresolved', data, `boxless text calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
+    const coversPlaceholder = (node: Element, style: CSSStyleDeclaration, content: Bounds) => {
+      if (!(node instanceof HTMLElement) || node.getClientRects().length !== 1 ||
+          style.backgroundImage !== 'none' || style.clipPath !== 'none' ||
+          style.maskImage !== 'none' || !['border-box', 'padding-box', 'content-box'].includes(style.backgroundClip)) return false;
+      const transform = transformFor(node);
+      if (transform.b !== 0 || transform.c !== 0 || transform.a <= 0 || transform.d <= 0) return false;
+      const corners = [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius];
+      if (corners.some(radius => !/^\d+(?:\.\d+)?px$/.test(radius))) return false;
+      const radius = Math.max(...corners.map(Number.parseFloat));
+      // The middle strips of a rounded box are opaque even when its corners are not.
+      const box = style.backgroundClip as 'border-box' | 'padding-box' | 'content-box';
+      const fits = (bounds: Bounds) => Object.values(edgeInsets(bounds, content)).every(distance => distance >= 0);
+      if (!fits(clientBounds(node, box, [0, radius, 0, radius])) &&
+          !fits(clientBounds(node, box, [radius, 0, radius, 0]))) return false;
+      try { return new contrast.commons.color.Color().parseString(style.backgroundColor).alpha === 1; }
+      catch { return false; }
+    };
     for (const el of elements.filter(el => el.matches('input:placeholder-shown, textarea:placeholder-shown') && !el.matches(':disabled') && !el.closest('[aria-disabled="true"]'))) {
       const style = placeholderStyle(el);
       if (!style) continue;
       const size = parseFloat(style.fontSize), bold = parseFloat(style.fontWeight) >= 700;
       const required = size >= 24 || (bold && size >= 56 / 3) ? 3 : 4.5;
       const data = { expectedContrastRatio: `${required}:1` };
-      let unsupported = false;
-      for (let node: Element | null = el; node; node = node.parentElement) {
+      let unsupported = false, opaqueBackdrop = false;
+      const content = clientBounds(el, 'content-box');
+      for (let node: Element | null = el; node; node = parent(node)) {
         const nodeStyle = getComputedStyle(node);
-        if ((nodeStyle.display !== 'contents' && parseFloat(nodeStyle.opacity) !== 1) || nodeStyle.filter !== 'none' || nodeStyle.backdropFilter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
+        if (!opaqueBackdrop) {
+          if (nodeStyle.backdropFilter !== 'none') unsupported = true;
+          opaqueBackdrop = coversPlaceholder(node, nodeStyle, content);
+        }
+        if ((nodeStyle.display !== 'contents' && (parseFloat(nodeStyle.opacity) !== 1 || nodeStyle.maskImage !== 'none')) || nodeStyle.filter !== 'none' || nodeStyle.mixBlendMode !== 'normal') unsupported = true;
       }
       if (unsupported || parseFloat(style.webkitTextStrokeWidth) > 0 || style.textShadow !== 'none' || style.filter !== 'none' || style.mixBlendMode !== 'normal') {
         reportContrast(el, 'unresolved', data, 'placeholder opacity, strokes, filters, blend modes, or text shadows need review');
@@ -602,6 +890,6 @@ export async function audit({ policy, contrast, accessibility, format, visibilit
       } catch (error) { reportContrast(el, 'unresolved', data, `placeholder calculation failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
   } finally { contrast.teardown(); }
-  const accessibilityCoverage = await accessibility({ elements, controls, visible, hasVisibleContent, add, engine: contrast });
-  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: controls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
+  const accessibilityCoverage = await accessibility({ elements, controls: semanticControls, visible, hasVisibleContent, parent, add, engine: contrast });
+  return { findings, suppressed, accessibilityCoverage, elements: elements.length, controls: semanticControls.length, insetControls, controlContentCoverage, numericElements, alignmentGroups, radiusContracts: elements.filter(el => el.matches('[data-ui-radius]')).length };
 }

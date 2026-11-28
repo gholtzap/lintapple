@@ -1,9 +1,12 @@
 import type { Page, Frame } from 'playwright';
+import { createVisibility } from './visibility.js';
 import type { SvgContrast } from './types.js';
 // Rasterize only SVG text whose foreground has a known solid paint.
 // The black/white pair identifies glyph pixels; hidden text reveals their actual background.
 export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]> {
   const results: SvgContrast[] = [];
+  const visibility = await page.evaluateHandle<ReturnType<typeof createVisibility>>(`(${createVisibility.toString()})()`);
+  try {
   for (const svg of await page.$$('svg:not(svg svg)')) {
     const targets = await svg.$$('text,tspan');
     const boxes = await Promise.all(targets.map(target => target.boundingBox()));
@@ -18,17 +21,8 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
     }
     // Labels in one capture must not remove each other's text backgrounds.
     for (const group of groups) {
-      const snapshot = await svg.evaluateHandle((svg, targets) => {
-        const selector = (el: Element) => {
-          const parts: string[] = [];
-          for (let node: Element | null = el; node; node = node.parentElement) {
-            const tag = node.tagName.toLowerCase();
-            if (!node.parentElement) { parts.unshift(tag); break; }
-            const siblings = [...node.parentElement.children].filter(other => other.tagName === node.tagName);
-            parts.unshift(`${tag}:nth-of-type(${siblings.indexOf(node) + 1})`);
-          }
-          return parts.join(' > ');
-        };
+      const snapshot = await svg.evaluateHandle((svg, { targets, visibility }) => {
+        const { selector, parent } = visibility;
         const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
         const context = canvas.getContext('2d', { willReadFrequently: true })!;
         const texts = [...svg.querySelectorAll<SVGTextContentElement>('text,tspan')].filter(el =>
@@ -40,7 +34,7 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
           const size = parseFloat(style.fontSize) * (matrix ? Math.min(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d)) : 1);
           let reason: string | null = el.querySelector('tspan') ? 'Nested SVG text needs review' : null;
           if (!/^(rgb|hsl|color\(|#[\da-f]|[a-z]+$)/i.test(style.fill) || style.fill.startsWith('url(') || style.fill === 'none' || style.stroke !== 'none') reason = 'SVG text needs a solid fill without a stroke';
-          for (let node: Element | null = el; node; node = node.parentElement) {
+          for (let node: Element | null = el; node; node = parent(node)) {
             const effect = getComputedStyle(node);
             if (parseFloat(effect.opacity) !== 1 || effect.filter !== 'none' || effect.backdropFilter !== 'none' || effect.mixBlendMode !== 'normal' || effect.textShadow !== 'none' || effect.maskImage !== 'none' || effect.animationName !== 'none') reason = 'SVG text effects need review';
           }
@@ -55,7 +49,7 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
         const box = svg.getBoundingClientRect();
         const clip = { x: Math.max(0, Math.floor(box.x + scrollX)), y: Math.max(0, Math.floor(box.y + scrollY)), width: Math.ceil(box.width), height: Math.ceil(box.height) };
         return { texts, clip };
-      }, group.map(index => targets[index]));
+      }, { targets: group.map(index => targets[index]), visibility });
       try {
         const info = await snapshot.evaluate(value => ({ clip: value.clip, count: value.texts.length }));
         if (!info.count) continue;
@@ -130,5 +124,6 @@ export async function svgTextContrast(page: Page | Frame): Promise<SvgContrast[]
     await Promise.all(targets.map(target => target.dispose()));
     await svg.dispose();
   }
+  } finally { await visibility.dispose(); }
   return results;
 }

@@ -6,7 +6,7 @@ import { runInteractions } from './interactions.js';
 export async function scanTooltips(page: Page, policy: Policy, checkPage: (page: Page, policy: Policy) => Promise<PageReport>, createVisibility: () => Visibility, explicit: Partial<InteractionPlan> = {}) {
   const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
   const discovery = await page.evaluate(({ visibility, excluded }) => {
-    const tooltips: InteractionPlan['tooltips'] = [];
+    const tooltips: TooltipCoverage['checked'] = [];
     const unmeasured: TooltipCoverage['unmeasured'] = [];
     const owned = new Set<Element>();
     const selector = (el: Element) => {

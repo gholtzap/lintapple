@@ -13,18 +13,35 @@ export interface Policy {
   minControlSize: number;
   controlSizeRules: { selector: string; minSize: number; minViewportWidth?: number; maxViewportWidth?: number }[];
   minControlGap: number;
+  controlGapRules: { selector: string; minGap: number }[];
   minControlInset: number;
   controlContainers: string[];
   contentInsetRules: { selector: string; contentSelector: string; insets: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>> }[];
   iconSizeRules: { selector: string; sizes: number[] }[];
+  fullImageSelectors: string[];
   minLayoutGap: number;
+  alignmentRules: { selector: string; itemSelector: string; alignment: 'start' | 'center' | 'end' }[];
+  layoutSeparationRules: {
+    selector: string;
+    before: string;
+    after: string;
+    axis: 'horizontal' | 'vertical';
+    minGap: number;
+    maxGap?: number;
+  }[];
   bannedCopy: string[];
   viewports: { width: number; height: number }[];
   colorSchemes: ('light' | 'dark')[];
   exceptions: { selector: string; rules: RuleId[]; reason: string }[];
 }
 export type Status = 'passed' | 'failed' | 'unresolved';
+export interface PageCheckOptions {
+  scope?: readonly string[];
+  identityAttribute?: `data-${string}`;
+}
 export interface FindingDetails {
+  elementKey?: string;
+  relatedElementKey?: string;
   viewport?: Policy['viewports'][number];
   selector?: string;
   relatedSelector?: string;
@@ -73,6 +90,7 @@ export interface FindingSummary extends FindingCounts {
   groups: FindingGroup[];
 }
 export interface PageReport {
+  scope?: readonly string[];
   frameCoverage: FrameCoverage;
   findings: Finding[];
   suppressed: SuppressedFinding[];
@@ -102,11 +120,13 @@ export interface MenuStep { key: Key; focus: string; checked?: CheckedState[]; o
 export interface Tabs { selector: string; steps: TabStep[] }
 export interface Menu { selector: string; open?: string; openKey?: 'Enter' | 'Space' | 'ArrowDown' | 'ArrowUp'; steps: MenuStep[] }
 export interface Ready { selector: string; state?: 'visible' | 'hidden'; expectedText?: string }
-export type NamedState = { name: string; selector: string; ready: Ready } & ({ action: 'click' | 'hover' } | { action: 'fill'; value: string } | { action: 'press'; key: string });
+export type Bound = 'x' | 'y' | 'width' | 'height';
+export interface StableBounds { selector: string; properties?: Bound[]; tolerance?: number }
+export type NamedState = { name: string; selector: string; ready: Ready; stableBounds?: StableBounds[] } & ({ action: 'click' | 'hover' } | { action: 'fill'; value: string } | { action: 'press'; key: string });
 export interface InteractionPlan {
   focus: { selector: string }[];
   buttons: { selector: string; key: 'Enter' | 'Space'; outcome: string; expectedText: string }[];
-  tooltips: { trigger: string; tooltip: string }[];
+  tooltips: { trigger: string; tooltip?: string }[];
   dialogs: { open: string; dialog: string; close: string; returnFocus?: string }[];
   tabs: Tabs[];
   menus: Menu[];
@@ -151,5 +171,5 @@ export interface AxeEngine {
   teardown(): void;
   commons: { aria: { getRole(el: Element, options: { fallback: boolean }): string | null }; dom: { isVisibleOnScreen(el: Element): boolean }; text: { visible(el: Element): string; accessibleText(el: Element, context?: { inLabelledByContext?: boolean }): string }; color: { Color: new () => Color; getBackgroundColor(el: Element): Color | null; flattenColors(fg: Color, bg: Color): Color; getContrast(bg: Color, fg: Color): number } };
 }
-export interface AccessibilityInput { elements: Element[]; controls: Element[]; visible: Visibility['visible']; hasVisibleContent: Visibility['hasVisibleContent']; add: AddFinding; engine: AxeEngine }
+export interface AccessibilityInput { elements: Element[]; controls: Element[]; visible: Visibility['visible']; hasVisibleContent: Visibility['hasVisibleContent']; parent: Visibility['parent']; add: AddFinding; engine: AxeEngine }
 export interface AuditInput { policy: Policy; contrast: AxeEngine; accessibility: typeof auditAccessibility; format: typeof finding; visibility: Visibility; svgContrast?: SvgContrast[] }

@@ -8,6 +8,8 @@ It should be impossible for AI to make a bad UI.
 
 [npm](https://www.npmjs.com/package/lintapple) · [Demo](https://lintapple.vercel.app/)
 
+Page checks include open shadow roots. Finding selectors use Playwright's `>> :scope >` path to name elements inside them. Native CSS selectors in policies still follow each root's CSS scope. Closed shadow roots are not accessible to the checker.
+
 ## Install
 
 Requires Node.js 22 or later. Run in your app’s project directory:
@@ -155,6 +157,23 @@ A check with no findings does not prove that omitted frames pass.
 Findings fail the test and attach a JSON report. If a passing page has omitted frames, the helper attaches a coverage report. The helper reads your `ui-policy.json`.
 See the [example tests](examples/playwright/).
 
+### Check part of a page
+
+Pass `scope` to report findings for a component. Each CSS selector must match one visible element in the current document. Add a second selector for a popover or menu rendered in a portal.
+
+```ts
+await expectUI(page, testInfo, undefined, {
+  scope: ['[data-testid="search-trigger"]', '[role="menu"]'],
+  identityAttribute: 'data-testid',
+});
+```
+
+Checks still use the complete document for clipping, spacing, and accessibility context.
+A finding is included when its target or related element is within a scope root. Document-level findings are outside a component scope. The attachment includes the selected roots. Coverage totals and the page size limit still apply to the complete document.
+
+Use the same options as the third argument to `checkPage(page, policy, options)`.
+In this mode, findings include an `elementKey` when the element has a unique ID or a unique value for the configured data attribute. The data attribute takes priority. Keys in open shadow roots also require a unique key for each host. Use keys to compare findings across states. Findings without a key use the positional selector, which can change when siblings move.
+
 ## Mark layout elements
 
 Font, contrast, control size, and screen bounds checks work without extra markup.
@@ -175,6 +194,26 @@ Add these attributes for checks that need layout information:
 You can also use `controlContainers` in the policy to select existing button containers.
 See [example styles](examples/ui.css).
 
+### Check existing layout groups
+
+Use `controlGapRules` to set a different minimum gap for a group. Each rule selects the group and sets `minGap` in CSS pixels. For example, a segmented control can use 2 px while other groups keep the default 8 px.
+
+```json
+{ "controlGapRules": [{ "selector": ".segmented-control", "minGap": 2 }] }
+```
+
+Each button belongs to its nearest group selected by a rule or marked with `data-ui-actions`.
+When more than one rule matches a group, the first rule applies. Other groups use `minControlGap`.
+A minimum of 0 allows shared edges. Overlapping buttons still fail.
+
+Use `alignmentRules` to check alignment in existing groups. Each rule selects a group, the items in it, and the horizontal edge or center to compare.
+
+```json
+{ "alignmentRules": [{ "selector": ".project-summary", "itemSelector": ".title, .details", "alignment": "start" }] }
+```
+
+The first rule that matches a group supplies its alignment and item selectors. Nested groups own their items. Groups can still use `data-ui-align` and `data-ui-align-item` without a policy rule.
+
 ## Automatic tooltip checks
 
 CLI and `checkUrl` scans open declared tooltips on hover and keyboard focus. They check the rendered page in each open state and check Escape dismissal and focus retention. While the hover tooltip is open, they resize to the other configured viewports. A tooltip can close on resize; if it stays open, it must fit. Resize findings retain the actual screen size.
@@ -183,7 +222,17 @@ Triggers are discovered through `aria-describedby` references to existing `role=
 
 `accessibilityCoverage.tooltips` lists automatically checked triggers and unmeasured cases. Native `title` tooltips, disabled or unreachable triggers, duplicate IDs, and tooltip elements without a visible declared trigger are reported as unmeasured. Scans check at most 100 declared tooltip relationships per page. These coverage limits alone do not change the exit code. An already-open tooltip has an unresolved opening check and exits with code `1`. Tooltips that fail to open on hover or focus, or fail to close on Escape, produce findings.
 
-An unmarked trigger whose tooltip does not exist until it opens cannot be discovered. Use an explicit interaction plan for it. `checkPage` and `expectUI` remain passive: open the tooltip in your test before calling them. Child frames still need separate checks.
+If a trigger adds `aria-describedby` only while its tooltip is open, select the trigger in an explicit interaction plan and omit the tooltip selector.
+
+```json
+{ "tooltips": [{ "trigger": "#about-requests" }] }
+```
+
+The scan follows `aria-describedby` after hover and keyboard focus. Each opening must name exactly one visible `role="tooltip"` element with text. Its ID can change on each opening. Escape must hide the tooltip and keep focus on the trigger. Other triggers still use the normal checks.
+
+Use this plan with `checkInteractions`, `checkUrl`, or the CLI `--interactions` option. `checkPage` and `expectUI` remain passive. Open the tooltip in your test before calling them. Child frames still need separate checks.
+
+While the pointer is over a trigger, an open custom tooltip and an active HTML `title` produce a `native-tooltip-conflict` finding. The check reads the title on the hovered element or its nearest ancestor with a title. An explicit empty `title` stops inheritance. For a custom hover label without `role="tooltip"`, set `data-ui-tooltip` to the label ID and call `checkPage` or `expectUI` while the label is open.
 
 ## Control content insets
 
@@ -233,6 +282,79 @@ The first rule whose `selector` matches a visible element applies. Each size is 
 The check measures element boxes, including borders and transforms. It works with selected SVG, image, and HTML elements. It does not measure the artwork inside an SVG view box or a pseudo-element. Hidden elements and selectors with no visible matches are skipped. Do not select rectangular icons unless they must use a square box.
 
 An `icon-size` finding includes the measured width and height and the configured sizes. Icon sizes do not change the minimum control hit area. An 18 px icon can sit inside a larger button.
+
+## Check full-image previews
+
+Use `fullImageSelectors` to select visible `img` elements that must show the full image.
+For example, set `"fullImageSelectors": [".asset-preview img"]` in `ui-policy.json`.
+The default list is empty. Leave intentionally cropped thumbnails out of the list.
+
+The check uses the loaded image dimensions, the content box, `object-fit`, and
+`object-position`. It checks for image content outside a rectangular overflow
+or paint clip on the image or an ancestor. A finding identifies the edge,
+the cut in CSS pixels, and the clipping ancestor when applicable. A cut of 1 px
+or less is within tolerance.
+
+Check the preview after the image loads. Unavailable image dimensions, masks,
+clip paths, mixed overflow modes on an image, and transforms that prevent
+rectangular measurement produce unresolved findings. The check does not measure
+rounded corners, obstruction by other elements, or cropping inside the source
+artwork. It skips hidden and unmatched images. Use a browser assertion if the
+state must include a particular image.
+
+## Check the gap between two elements
+
+Use `layoutSeparationRules` to check the order and gap between two parts of
+a component. For example, require the caption to sit below the artwork and
+within 8 px of it:
+
+```json
+{
+  "layoutSeparationRules": [
+    {
+      "selector": ".card",
+      "before": ".artwork",
+      "after": ".caption",
+      "axis": "vertical",
+      "minGap": 0,
+      "maxGap": 8
+    }
+  ]
+}
+```
+
+The default list is empty. Each rule applies to each matching group with
+visible content. Both endpoint selectors must match one distinct visible
+element in the group. Elements in nested matching groups belong to those groups.
+Missing or ambiguous endpoints produce an unresolved finding. Select the parent
+state where both parts are required if a part is intentionally absent in other states.
+
+The check measures the gap between rendered boxes in CSS pixels, from top to
+bottom for `vertical` and in the group's text direction for `horizontal`.
+Overlap or reversed order gives a negative gap. Set `minGap` to zero to allow
+edges to touch. Leave out `maxGap` to check only the minimum. The tolerance is
+0.1 px. Other spacing and alignment checks still apply.
+
+## Stable bounds after an action
+
+Add `stableBounds` to a named interaction state to check if a change moves or resizes an element. For example, check a revision count when it changes from 9 to 10.
+
+```json
+{
+  "states": [{
+    "name": "Increase revision count",
+    "action": "click",
+    "selector": "#increase",
+    "ready": { "selector": "#revision-count", "expectedText": "10" },
+    "stableBounds": [
+      { "selector": "#revision-count", "properties": ["width"] },
+      { "selector": "#increase", "properties": ["x"], "tolerance": 0.5 }
+    ]
+  }]
+}
+```
+
+Each selector must match one visible element before the action. Lintapple compares its rendered bounds before the action and after the ready condition. Use a ready condition that indicates the end of any transition you want to exclude. The default properties are `width` and `height`. The default tolerance is 1 CSS pixel. The `x` and `y` properties are relative to the viewport, so scrolling can change them.
 
 ## Development
 

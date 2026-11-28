@@ -112,3 +112,47 @@ test('icon-size API and CLI retain opt-in reports and corrected controls', async
     await writeFile('test-results/icon-size/receipt.json', JSON.stringify(records, null, 2));
   } finally { await browser.close(); }
 });
+
+test('icon sizes stay stable through single and nested scrolling without accepting permanent clips', async () => {
+  const directory = resolve('test-results/icon-size/scrolling');
+  await mkdir(directory, { recursive: true });
+  const config = resolve(directory, 'policy.json');
+  const scrollingPolicy: Partial<Policy> = { iconSizeRules: [{ selector: '.icon', sizes: [24] }], viewports: [{ width: 390, height: 720 }, { width: 1440, height: 720 }], colorSchemes: ['light', 'dark'] };
+  await writeFile(config, JSON.stringify(scrollingPolicy));
+  const browser = await chromium.launch();
+  try {
+    for (const axis of ['X', 'Y']) for (const mode of ['single', 'nested', 'permanent', 'unreachable']) {
+      const offset = mode === 'unreachable' ? -4 : 100;
+      const pageHtml = `<!doctype html><html lang="en"><title>Scrollable icon</title><style>
+html{background:white;color:#111;font:16px system-ui}body{margin:24px}
+#shell,#outer,#scroll{width:120px;height:120px}#shell{overflow:hidden}
+#outer{overflow:${mode === 'nested' ? 'auto' : 'visible'}}
+#scroll{position:relative;overflow:${mode === 'permanent' ? 'visible' : 'auto'};${mode === 'nested' ? `margin-${axis === 'X' ? 'left' : 'top'}:100px;` : ''}}
+.icon{position:absolute;left:${axis === 'X' ? offset : 0}px;top:${axis === 'Y' ? offset : 0}px;width:24px;height:24px;background:#444}
+</style><body><div id="shell"><div id="outer"><div id="scroll"><span class="icon" aria-hidden="true"></span></div></div></div><p>Projects</p></body></html>`;
+      const file = resolve(directory, `${axis}-${mode}.html`);
+      await writeFile(file, pageHtml);
+      const fails = mode === 'permanent' || mode === 'unreachable';
+      for (const viewport of scrollingPolicy.viewports!) for (const colorScheme of scrollingPolicy.colorSchemes!) {
+        const page = await browser.newPage({ viewport, colorScheme });
+        try {
+          await page.goto(pathToFileURL(file).href);
+          for (const scroll of [0, 10000]) {
+            await page.locator('#outer, #scroll').evaluateAll((elements, scroll) => elements.forEach(el => { el.scrollLeft = el.scrollTop = scroll; }), scroll);
+            const positions = await page.locator('#outer, #scroll').evaluateAll(elements => elements.map(el => [el.scrollLeft, el.scrollTop]));
+            const report = await checkPage(page, scrollingPolicy);
+            assert.equal(report.findings.some(f => f.rule === 'icon-size'), fails, `${axis}/${mode}/${viewport.width}/${colorScheme}/${scroll}: ${JSON.stringify(report.findings)}`);
+            assert.deepEqual(await page.locator('#outer, #scroll').evaluateAll(elements => elements.map(el => [el.scrollLeft, el.scrollTop])), positions);
+          }
+        } finally { await page.close(); }
+      }
+      let code = 0, stdout: string;
+      try { ({ stdout } = await execute(process.execPath, ['dist/bin/lintapple.js', pathToFileURL(file).href, '--config', config, '--json'])); }
+      catch (error) { assertProcessError(error); assert.equal(typeof error.code, 'number'); code = Number(error.code); stdout = error.stdout; }
+      const report: UrlReport = JSON.parse(stdout);
+      await writeFile(`${file}.json`, stdout);
+      assert.equal(code, fails ? 1 : 0, `${axis}/${mode}`);
+      for (const run of report.runs) assert.equal(run.states[0].findings.some(f => f.rule === 'icon-size'), fails, `${axis}/${mode}`);
+    }
+  } finally { await browser.close(); }
+});

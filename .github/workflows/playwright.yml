@@ -1,6 +1,8 @@
 name: Playwright UI checks
 on:
   push:
+    branches: [main]
+    tags: ['**']
   pull_request:
   workflow_dispatch:
     inputs:
@@ -10,6 +12,9 @@ on:
         type: string
 permissions:
   contents: read
+concurrency:
+  group: lintapple-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   ui:
     runs-on: ubuntu-latest
@@ -25,11 +30,34 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+      - run: bun install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
       - run: npx playwright install --with-deps chromium
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run test:playwright
+      - name: Check types and build once
+        run: bun run --parallel --no-exit-on-error typecheck build
+      - name: Run duration-balanced shards on the same runner
+        shell: bash
+        run: |
+          mkdir -p test-results
+          pids=()
+          for shard in 1 2 3; do
+            node dist/scripts/ci-tests.js --shard="$shard/3" > "test-results/ci-tests-$shard.log" 2>&1 &
+            pids+=("$!")
+          done
+          result=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || result=1
+          done
+          cat test-results/ci-tests-*.log
+          exit "$result"
+      - name: Run Playwright against the same build
+        run: bun run test:playwright:built
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

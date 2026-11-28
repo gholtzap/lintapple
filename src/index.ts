@@ -1,5 +1,5 @@
 import type { Page, Frame, JSHandle } from 'playwright';
-import type { Policy, PageReport, InteractionPlan, InteractionReport, CheckOptions, UrlReport, AxeEngine, Visibility, Finding, SuppressedFinding } from './types.js';
+import type { Policy, PageReport, InteractionPlan, InteractionReport, CheckOptions, PageCheckOptions, UrlReport, AxeEngine, Visibility, Finding, SuppressedFinding } from './types.js';
 import policyDefaults from '../ui-policy.json' with { type: 'json' };
 export type * from './types.js';
 import { launchBrowser } from './browser.js';
@@ -17,7 +17,7 @@ import { svgTextContrast } from './svg-contrast.js';
 const engineSource = axe.source.replace('window.axe = axe;', '');
 if (engineSource === axe.source) throw new Error('The accessibility engine export could not be isolated.');
 
-export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'layout-gap', 'layout-alignment', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'target-size'] as const;
+export const ruleIds = ['font-family', 'font-size', 'copy', 'control-size', 'control-gap', 'control-inset', 'content-inset', 'icon-size', 'image-framing', 'layout-gap', 'layout-separation', 'layout-alignment', 'layout-stability', 'tabular-numbers', 'numeric-alignment', 'nested-radius', 'root-background', 'horizontal-overflow', 'viewport-bounds', 'content-clipping', 'content-overflow', 'text-contrast', 'font-loading', 'accessible-name', 'form-label', 'aria-reference', 'label-consistency', 'control-state', 'keyboard-operation', 'focus-visible', 'focus-obscured', 'dialog-focus', 'icon-button-tooltip', 'native-tooltip-conflict', 'target-size'] as const;
 export const defaultPolicy: Policy = { ...policyDefaults, colorSchemes: policyDefaults.colorSchemes.map(scheme => { if (scheme !== 'light' && scheme !== 'dark') throw new Error('Invalid default color scheme.'); return scheme; }) };
 
 export function validatePolicy(input: unknown = {}): Policy {
@@ -46,6 +46,12 @@ export function validatePolicy(input: unknown = {}): Policy {
     }
     if ((rule.minViewportWidth ?? 1) > (rule.maxViewportWidth ?? 10000)) throw new Error('Control size rule viewport bounds must be in increasing order.');
   }
+  if (!Array.isArray(policy.controlGapRules)) throw new Error('controlGapRules must be a list.');
+  for (const rule of policy.controlGapRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'minGap'].includes(key)) ||
+        typeof rule.selector !== 'string' || !rule.selector.trim() || !Number.isFinite(rule.minGap) || rule.minGap < 0)
+      throw new Error('Each control gap rule needs a selector and a finite nonnegative minGap.');
+  }
   if (!Array.isArray(policy.contentInsetRules)) throw new Error('contentInsetRules must be a list.');
   for (const rule of policy.contentInsetRules) {
     if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'contentSelector', 'insets'].includes(key)) ||
@@ -65,8 +71,29 @@ export function validatePolicy(input: unknown = {}): Policy {
     for (const size of rule.sizes) positive(size, 'icon-size sizes');
   }
   positive(policy.minLayoutGap, 'minLayoutGap');
+  if (!Array.isArray(policy.alignmentRules)) throw new Error('alignmentRules must be a list.');
+  for (const rule of policy.alignmentRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || Object.keys(rule).some(key => !['selector', 'itemSelector', 'alignment'].includes(key)) ||
+        typeof rule.selector !== 'string' || !rule.selector.trim() || typeof rule.itemSelector !== 'string' || !rule.itemSelector.trim() ||
+        !['start', 'center', 'end'].includes(rule.alignment))
+      throw new Error('Each alignment rule needs a group selector, item selector, and start, center, or end alignment.');
+  }
+  if (!Array.isArray(policy.layoutSeparationRules)) throw new Error('layoutSeparationRules must be a list.');
+  for (const rule of policy.layoutSeparationRules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) ||
+        Object.keys(rule).some(key => !['selector', 'before', 'after', 'axis', 'minGap', 'maxGap'].includes(key)) ||
+        [rule.selector, rule.before, rule.after].some(value => typeof value !== 'string' || !value.trim()) ||
+        !['horizontal', 'vertical'].includes(rule.axis)) {
+      throw new Error('Each layout separation rule needs a selector, before and after selectors, and an axis.');
+    }
+    if (!Number.isFinite(rule.minGap) || rule.minGap < 0 ||
+        (rule.maxGap !== undefined && (!Number.isFinite(rule.maxGap) || rule.maxGap < rule.minGap))) {
+      throw new Error('Layout separation gaps must be nonnegative numbers in increasing order.');
+    }
+  }
   positive(policy.minControlInset, 'minControlInset');
   strings(policy.controlContainers, 'controlContainers');
+  strings(policy.fullImageSelectors, 'fullImageSelectors', false);
   if (!Array.isArray(policy.viewports) || !policy.viewports.length) throw new Error('viewports must be a nonempty list.');
   for (const v of policy.viewports) if (!v || Object.keys(v).some(k => !['width', 'height'].includes(k)) || !Number.isInteger(v.width) || !Number.isInteger(v.height) || v.width < 1 || v.height < 1 || v.width > 10000 || v.height > 10000) throw new Error('Each viewport needs integer width and height from 1 to 10000.');
   if (!Array.isArray(policy.colorSchemes) || !policy.colorSchemes.length || [...policy.colorSchemes].some(s => !['light', 'dark'].includes(s))) throw new Error('colorSchemes must contain light or dark.');
@@ -80,8 +107,13 @@ export function validatePolicy(input: unknown = {}): Policy {
 }
 
 // Use this API after your test enters a dialog, error state, or signed-in page.
-export async function checkPage(page: Page | Frame, input: Partial<Policy> = {}): Promise<PageReport> {
+export async function checkPage(page: Page | Frame, input: Partial<Policy> = {}, options: PageCheckOptions = {}): Promise<PageReport> {
   const policy = validatePolicy(input);
+  if (options.scope !== undefined && (!Array.isArray(options.scope) || !options.scope.length ||
+      [...options.scope].some((selector: unknown) => typeof selector !== 'string' || !selector.trim())))
+    throw new Error('Page scope must be a nonempty list of CSS selectors.');
+  if (options.identityAttribute !== undefined && (typeof options.identityAttribute !== 'string' || !/^data-[a-z][a-z0-9_-]*$/.test(options.identityAttribute)))
+    throw new Error('The identity attribute must be a lowercase data attribute.');
   await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -97,7 +129,7 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
     handles.push(format);
     const visibility = await page.evaluateHandle<Visibility>(`(${createVisibility.toString()})()`);
     handles.push(visibility);
-    const result = await page.evaluate(audit, { policy, contrast, accessibility, format, visibility, svgContrast });
+    const result = await page.evaluate(audit, { policy, contrast, accessibility, format, visibility, svgContrast, options });
     const frame = 'mainFrame' in page ? page.mainFrame() : page;
     const descendants = (parent: Frame): Frame[] => parent.childFrames().flatMap(child => [child, ...descendants(child)]);
     const path = (frame: Frame): string => {
@@ -105,7 +137,7 @@ export async function checkPage(page: Page | Frame, input: Partial<Policy> = {})
       return parent ? `${path(parent)}/${parent.childFrames().indexOf(frame)}` : 'main';
     };
     const describe = (frame: Frame) => ({ url: frame.url(), name: frame.name(), path: path(frame) });
-    return { ...result, findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
+    return { ...result, ...(options.scope ? { scope: options.scope } : {}), findings: result.findings.map(item => ({ ...item, documentUrl: frame.url(), framePath: path(frame) })), frameCoverage: { checked: describe(frame), omitted: descendants(frame).map(describe) } };
   }
   finally { await Promise.all(handles.map(handle => handle.dispose())); }
 }
@@ -114,7 +146,7 @@ export async function checkInteractions(page: Page, plan: Partial<InteractionPla
   if (!Number.isInteger(timeout) || timeout < 1) throw new Error('Page-check timeout must be a positive integer.');
   const validated = validateInteractions(plan);
   const policy = validatePolicy(input);
-  return runInteractions(page, validated, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility);
+  return runInteractions(page, validated, policy, (page, policy) => checkPageWithTooltipPlan(page, policy, timeout, validated), createVisibility);
 }
 
 async function checkPageWithin(page: Page | Frame, policy: Policy, timeout: number): Promise<PageReport> {
@@ -126,11 +158,25 @@ async function checkPageWithin(page: Page | Frame, policy: Policy, timeout: numb
   } finally { clearTimeout(timer); }
 }
 
+async function checkPageWithTooltipPlan(page: Page, policy: Policy, timeout: number, plan?: Partial<InteractionPlan>): Promise<PageReport> {
+  const report = await checkPageWithin(page, policy, timeout);
+  const triggers = plan?.tooltips?.filter(item => item.tooltip === undefined).map(item => item.trigger);
+  if (!triggers?.length) return report;
+  const candidates = report.findings.filter(item => item.rule === 'icon-button-tooltip' && item.actual === 'no linked text tooltip');
+  if (!candidates.length) return report;
+  // An explicit interaction check owns the closed-state finding for its trigger.
+  const deferred = await page.evaluate(({ candidates, triggers }) => {
+    const targets = triggers.map(value => document.querySelectorAll(value)).filter(matches => matches.length === 1).map(matches => matches[0]);
+    return candidates.filter(value => !value.includes(' >> ') && targets.includes(document.querySelector(value)!));
+  }, { candidates: candidates.map(item => item.selector), triggers });
+  return { ...report, findings: report.findings.filter(item => !candidates.includes(item) || !deferred.includes(item.selector)) };
+}
+
 export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready, timeout = 15000, interactions }: CheckOptions = {}): Promise<UrlReport> {
   const parsed = new URL(url);
   if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) throw new Error('Use an HTTP, HTTPS, or file URL.');
   const policy = validatePolicy(input);
-  if (interactions !== undefined) validateInteractions(interactions);
+  const plan = interactions === undefined ? undefined : validateInteractions(interactions);
   const browser = await launchBrowser();
   const report: UrlReport = { url, rules: ruleIds, runs: [], findings: [], summary: summarizeFindings([]) };
   try {
@@ -145,7 +191,7 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
           throw new Error(`Page returned HTTP ${response.status()} at ${response.url()}.`);
         }
         if (ready) await page.locator(ready).waitFor({ state: 'visible' });
-        const result = await checkPageWithin(page, policy, timeout);
+        const result = await checkPageWithTooltipPlan(page, policy, timeout, plan);
         const states = [{ name: 'initial', url: page.url(), ...result }];
         const findings: Finding[] = result.findings.map(f => ({ ...f, state: 'initial' }));
         const suppressed: SuppressedFinding[] = result.suppressed.map(f => ({ ...f, state: 'initial' }));
@@ -158,7 +204,7 @@ export async function checkUrl(url: string, input: Partial<Policy> = {}, { ready
           accessibilityCoverage.interactions = interaction.checks;
           accessibilityCoverage.interactionRules = interaction.checks.length ? 'only listed interactions tested' : interaction.states.length ? 'not tested: page-state actions only' : 'not tested: empty interaction plan';
         }
-        const automatic = await scanTooltips(page, policy, (page, policy) => checkPageWithin(page, policy, timeout), createVisibility, interactions);
+        const automatic = await scanTooltips(page, policy, (page, policy) => checkPageWithTooltipPlan(page, policy, timeout, plan), createVisibility, plan);
         findings.push(...automatic.findings);
         suppressed.push(...automatic.suppressed);
         states.push(...automatic.states);
